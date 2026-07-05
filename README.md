@@ -12,12 +12,16 @@ A single TradingView Pine Script (v5) indicator that packs the full #TheStrat to
   - `1-2-2` RevStrat
   - `2-3` outside-bar engulf reversals
   - Optional `2-2` continuation triangles
+- **FTFC signal filter** — optionally suppress signals that fight the higher timeframes: `Majority` mode requires most enabled timeframes to agree with the signal's direction, `Strict` mode requires full timeframe continuity.
+- **A+ setup grading** — reversal triggers that also print a hammer/shooter (on the setup or trigger bar) while FTFC majority agrees are upgraded with a ★ and a larger label, plus dedicated alerts.
+- **Magnitude target lines** — every reversal trigger projects the pattern's high/low as a dotted first-magnitude target; the line thickens and freezes when hit, or expires after N bars. Alerts fire on target hits.
+- **Mother-bar range boxes** — each inside bar draws its mother bar's range as a box that extends through compound inside bars until price breaks out, with break-up/break-down alerts.
 - **Full Timeframe Continuity (FTFC) table** — live open-vs-price direction for 15m, 1H, 4H, D, W, M, Q, Y (each toggleable), with an overall `FTFC BULL / BEAR / Mixed` summary and the current 3-bar combo string. Timeframes below the chart timeframe can be auto-hidden.
 - **Multi-timeframe strat candles** — the table's `Strat` row shows what candle type (1 / 2U / 2D / 3) each higher timeframe is currently printing.
 - **Pivot Machine Gun (PMG)** — flags when a configurable-length string of higher lows (or lower highs) gets snapped.
 - **Hammers & shooters** — marked with `H` / `S` characters.
 - **Inside-bar trigger lines** — dashed lines drawn from each inside bar's high and low, extended until price breaks them (capped number of active setups).
-- **12 built-in alerts** — bullish/bearish reversals, continuations, inside bar, outside bar, hammer, shooter, PMG bull/bear, and FTFC flipping bullish or bearish.
+- **18 built-in alerts** — bullish/bearish reversals, A+ setups, continuations, inside bar, outside bar, hammer, shooter, PMG bull/bear, magnitude target hits, mother-bar breakouts, and FTFC flipping bullish or bearish.
 
 ## Installation
 
