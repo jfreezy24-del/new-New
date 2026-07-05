@@ -1,0 +1,317 @@
+//@version=5
+// ─────────────────────────────────────────────────────────────────────────────
+//  TheStrat All-In-One
+//  Candle numbering (1 / 2U / 2D / 3) • Actionable combo signals • Full
+//  Timeframe Continuity (FTFC) table • Multi-timeframe strat candles •
+//  PMG detection • Hammers & Shooters • Inside-bar trigger lines • Alerts
+// ─────────────────────────────────────────────────────────────────────────────
+indicator("TheStrat All-In-One", shorttitle = "Strat AIO", overlay = true,
+     max_labels_count = 500, max_lines_count = 500)
+
+// ═════════════════════════════════ INPUTS ═══════════════════════════════════
+grpBars = "Candles"
+showNums    = input.bool(true,  "Show candle numbers (1 / 2 / 3)",   group = grpBars)
+showColors  = input.bool(true,  "Color bars by strat type",         group = grpBars)
+colInside   = input.color(color.yellow,          "Inside (1)",      group = grpBars, inline = "c1")
+colOutside  = input.color(color.fuchsia,         "Outside (3)",     group = grpBars, inline = "c1")
+colUp       = input.color(color.new(#26a69a, 0), "2 Up",            group = grpBars, inline = "c2")
+colDown     = input.color(color.new(#ef5350, 0), "2 Down",          group = grpBars, inline = "c2")
+
+grpSig = "Signals"
+showRev     = input.bool(true,  "Show reversal signals (2-2, 2-1-2, 3-2-2, 1-2-2 …)", group = grpSig)
+showCont    = input.bool(true,  "Show continuation signals (2-2 same direction)",     group = grpSig)
+showHamSho  = input.bool(true,  "Show hammers / shooters",                            group = grpSig)
+showPMG     = input.bool(true,  "Show Pivot Machine Gun (PMG)",                       group = grpSig)
+pmgLen      = input.int(5,      "PMG: consecutive higher lows / lower highs", minval = 3, maxval = 15, group = grpSig)
+
+grpTrig = "Inside-Bar Trigger Lines"
+showTrigLn  = input.bool(true, "Draw trigger lines from inside bars", group = grpTrig)
+maxTrigLn   = input.int(8, "Max active inside-bar setups", minval = 1, maxval = 25, group = grpTrig)
+
+grpTbl = "Continuity / MTF Table"
+showTable   = input.bool(true, "Show FTFC + MTF strat table", group = grpTbl)
+tblPos      = input.string("Top Right", "Table position",
+     options = ["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group = grpTbl)
+autoHideLow = input.bool(true, "Hide timeframes below the chart timeframe", group = grpTbl)
+use15  = input.bool(true,  "15m", group = grpTbl, inline = "tf1")
+use60  = input.bool(true,  "1H",  group = grpTbl, inline = "tf1")
+use240 = input.bool(true,  "4H",  group = grpTbl, inline = "tf1")
+useD   = input.bool(true,  "D",   group = grpTbl, inline = "tf2")
+useW   = input.bool(true,  "W",   group = grpTbl, inline = "tf2")
+useM   = input.bool(true,  "M",   group = grpTbl, inline = "tf2")
+useQ   = input.bool(false, "Q",   group = grpTbl, inline = "tf3")
+useY   = input.bool(false, "Y",   group = grpTbl, inline = "tf3")
+
+// ═══════════════════════════ STRAT CANDLE TYPES ═════════════════════════════
+// Code:  1 = inside, 3 = outside, 2 = 2-up, -2 = 2-down
+f_code(h, l, ph, pl) =>
+    h <= ph and l >= pl ? 1 : h > ph and l < pl ? 3 : h > ph ? 2 : -2
+
+f_name(int k) =>
+    na(k) ? "–" : k == 1 ? "1" : k == 3 ? "3" : k == 2 ? "2U" : "2D"
+
+f_kcol(int k) =>
+    na(k) ? color.gray : k == 1 ? colInside : k == 3 ? colOutside : k == 2 ? colUp : colDown
+
+int code = bar_index > 0 ? f_code(high, low, high[1], low[1]) : na
+
+// Bar coloring & numbering
+barcolor(showColors and not na(code) ?
+     (code == 1 ? colInside : code == 3 ? colOutside : code == 2 ? colUp : colDown) : na)
+
+plotchar(showNums and code ==  1, "Inside (1)",  "1", location.abovebar, colInside,  size = size.tiny)
+plotchar(showNums and code ==  2, "Two Up (2)",  "2", location.abovebar, colUp,      size = size.tiny)
+plotchar(showNums and code == -2, "Two Dn (2)",  "2", location.abovebar, colDown,    size = size.tiny)
+plotchar(showNums and code ==  3, "Outside (3)", "3", location.abovebar, colOutside, size = size.tiny)
+
+// ═══════════════════════════ COMBO / SIGNAL LOGIC ═══════════════════════════
+bool bullTrig = code == 2  or (code == 3 and close > open)
+bool bearTrig = code == -2 or (code == 3 and close < open)
+
+// Reversal patterns — the current bar is the trigger bar
+string bullName = na
+if bullTrig and not na(code[1])
+    if code[1] == 1
+        bullName := f_name(code[2]) + "-1-2U"                    // 2-1-2, 3-1-2, 1-1-2 (or X-1-3)
+    else if code[1] == -2 and code == 2
+        bullName := code[2] == 1 ? "1-2-2 RevStrat" :
+                    code[2] == 3 ? "3-2-2 Bull"     : "2-2 Bull Rev"
+    else if code[1] == -2 and code == 3
+        bullName := "2-3 Bull"
+
+string bearName = na
+if bearTrig and not na(code[1])
+    if code[1] == 1
+        bearName := f_name(code[2]) + "-1-2D"
+    else if code[1] == 2 and code == -2
+        bearName := code[2] == 1 ? "1-2-2 RevStrat" :
+                    code[2] == 3 ? "3-2-2 Bear"     : "2-2 Bear Rev"
+    else if code[1] == 2 and code == 3
+        bearName := "2-3 Bear"
+
+bool bullRev = not na(bullName)
+bool bearRev = not na(bearName)
+
+// Continuations: consecutive directional 2s
+bool bullCont = code == 2  and code[1] == 2
+bool bearCont = code == -2 and code[1] == -2
+
+if showRev and bullRev and barstate.isconfirmed
+    label.new(bar_index, low, bullName, style = label.style_label_up,
+         color = color.new(colUp, 15), textcolor = color.white, size = size.small)
+if showRev and bearRev and barstate.isconfirmed
+    label.new(bar_index, high, bearName, style = label.style_label_down,
+         color = color.new(colDown, 15), textcolor = color.white, size = size.small)
+
+plotshape(showCont and bullCont and not bullRev, "Bull continuation", shape.triangleup,
+     location.belowbar, colUp, size = size.tiny)
+plotshape(showCont and bearCont and not bearRev, "Bear continuation", shape.triangledown,
+     location.abovebar, colDown, size = size.tiny)
+
+// ─────────────────────────── Hammers & Shooters ─────────────────────────────
+float rng    = high - low
+bool  hammer  = rng > 0 and math.min(open, close) >= low  + 0.66 * rng
+bool  shooter = rng > 0 and math.max(open, close) <= high - 0.66 * rng
+
+plotchar(showHamSho and hammer,  "Hammer",  "H", location.belowbar, colUp,   size = size.tiny)
+plotchar(showHamSho and shooter, "Shooter", "S", location.abovebar, colDown, size = size.tiny)
+
+// ─────────────────────── Pivot Machine Gun (PMG) ─────────────────────────────
+var int hlCount = 0   // consecutive higher lows
+var int lhCount = 0   // consecutive lower highs
+hlCount := low  > low[1]  ? hlCount + 1 : 0
+lhCount := high < high[1] ? lhCount + 1 : 0
+
+bool pmgBear = hlCount[1] >= pmgLen and low  < low[1]    // string of higher lows snapped
+bool pmgBull = lhCount[1] >= pmgLen and high > high[1]   // string of lower highs snapped
+
+if showPMG and pmgBull and barstate.isconfirmed
+    label.new(bar_index, low, "PMG ▲", style = label.style_label_up,
+         color = color.new(color.teal, 0), textcolor = color.white, size = size.small)
+if showPMG and pmgBear and barstate.isconfirmed
+    label.new(bar_index, high, "PMG ▼", style = label.style_label_down,
+         color = color.new(color.maroon, 0), textcolor = color.white, size = size.small)
+
+// ═══════════════════ INSIDE-BAR TRIGGER LINES (actionable) ══════════════════
+var array<line>  trigLn    = array.new<line>()
+var array<float> trigPx    = array.new<float>()
+var array<bool>  trigIsHi  = array.new<bool>()
+
+f_addTrig(float px, bool isHi) =>
+    array.push(trigLn, line.new(bar_index, px, bar_index + 1, px,
+         color = isHi ? colUp : colDown, style = line.style_dashed, width = 1))
+    array.push(trigPx, px)
+    array.push(trigIsHi, isHi)
+
+if showTrigLn and code == 1 and barstate.isconfirmed
+    f_addTrig(high, true)
+    f_addTrig(low, false)
+    // cap the number of tracked setups (2 lines per inside bar)
+    while array.size(trigLn) > maxTrigLn * 2
+        line.delete(array.shift(trigLn))
+        array.shift(trigPx)
+        array.shift(trigIsHi)
+
+if array.size(trigLn) > 0
+    for i = array.size(trigLn) - 1 to 0
+        ln = array.get(trigLn, i)
+        px = array.get(trigPx, i)
+        broken = array.get(trigIsHi, i) ? high > px : low < px
+        line.set_x2(ln, bar_index)
+        if broken
+            array.remove(trigLn, i)
+            array.remove(trigPx, i)
+            array.remove(trigIsHi, i)
+
+// ═══════════════ FULL TIMEFRAME CONTINUITY + MTF STRAT CANDLES ══════════════
+f_tf(tf) =>
+    request.security(syminfo.tickerid, tf,
+         [open, close, f_code(high, low, high[1], low[1])],
+         lookahead = barmerge.lookahead_off)
+
+[o15,  c15,  k15]  = f_tf("15")
+[o60,  c60,  k60]  = f_tf("60")
+[o240, c240, k240] = f_tf("240")
+[oD,   cD,   kD]   = f_tf("D")
+[oW,   cW,   kW]   = f_tf("W")
+[oM,   cM,   kM]   = f_tf("M")
+[oQ,   cQ,   kQ]   = f_tf("3M")
+[oY,   cY,   kY]   = f_tf("12M")
+
+chartSec = timeframe.in_seconds(timeframe.period)
+f_on(userOn, tf) =>
+    userOn and (not autoHideLow or timeframe.in_seconds(tf) >= chartSec)
+
+on15  = f_on(use15,  "15")
+on60  = f_on(use60,  "60")
+on240 = f_on(use240, "240")
+onD   = f_on(useD,   "D")
+onW   = f_on(useW,   "W")
+onM   = f_on(useM,   "M")
+onQ   = f_on(useQ,   "3M")
+onY   = f_on(useY,   "12M")
+
+// Continuity tally across the enabled timeframes
+int bullCnt = 0
+int bearCnt = 0
+int totCnt  = 0
+f_dir(o, c) => c > o ? 1 : c < o ? -1 : 0
+if on15
+    totCnt  += 1
+    bullCnt += f_dir(o15, c15) > 0 ? 1 : 0
+    bearCnt += f_dir(o15, c15) < 0 ? 1 : 0
+if on60
+    totCnt  += 1
+    bullCnt += f_dir(o60, c60) > 0 ? 1 : 0
+    bearCnt += f_dir(o60, c60) < 0 ? 1 : 0
+if on240
+    totCnt  += 1
+    bullCnt += f_dir(o240, c240) > 0 ? 1 : 0
+    bearCnt += f_dir(o240, c240) < 0 ? 1 : 0
+if onD
+    totCnt  += 1
+    bullCnt += f_dir(oD, cD) > 0 ? 1 : 0
+    bearCnt += f_dir(oD, cD) < 0 ? 1 : 0
+if onW
+    totCnt  += 1
+    bullCnt += f_dir(oW, cW) > 0 ? 1 : 0
+    bearCnt += f_dir(oW, cW) < 0 ? 1 : 0
+if onM
+    totCnt  += 1
+    bullCnt += f_dir(oM, cM) > 0 ? 1 : 0
+    bearCnt += f_dir(oM, cM) < 0 ? 1 : 0
+if onQ
+    totCnt  += 1
+    bullCnt += f_dir(oQ, cQ) > 0 ? 1 : 0
+    bearCnt += f_dir(oQ, cQ) < 0 ? 1 : 0
+if onY
+    totCnt  += 1
+    bullCnt += f_dir(oY, cY) > 0 ? 1 : 0
+    bearCnt += f_dir(oY, cY) < 0 ? 1 : 0
+
+bool ftfcBull = totCnt > 0 and bullCnt == totCnt
+bool ftfcBear = totCnt > 0 and bearCnt == totCnt
+
+// ─────────────────────────────── Table render ────────────────────────────────
+f_tblPos(p) =>
+    p == "Top Right" ? position.top_right : p == "Top Left" ? position.top_left :
+     p == "Bottom Right" ? position.bottom_right : position.bottom_left
+
+var table t = table.new(f_tblPos(tblPos), 9, 4, border_width = 1,
+     frame_color = color.new(color.gray, 40), border_color = color.new(color.gray, 60))
+
+f_cellHdr(int c, string txt) =>
+    table.cell(t, c, 0, txt, text_color = color.white, text_size = size.small,
+         bgcolor = color.new(color.gray, 30))
+
+f_cellDir(int c, float o, float cl) =>
+    d = f_dir(o, cl)
+    table.cell(t, c, 1, d > 0 ? "▲" : d < 0 ? "▼" : "•",
+         text_color = color.white, text_size = size.small,
+         bgcolor = d > 0 ? color.new(colUp, 20) : d < 0 ? color.new(colDown, 20) : color.new(color.gray, 40))
+
+f_cellStrat(int c, int k) =>
+    table.cell(t, c, 2, f_name(k), text_color = color.white, text_size = size.small,
+         bgcolor = color.new(f_kcol(k), 35))
+
+f_col(int c, string nm, float o, float cl, int k) =>
+    f_cellHdr(c, nm)
+    f_cellDir(c, o, cl)
+    f_cellStrat(c, k)
+
+var bool tblMerged = false
+if showTable and barstate.islast
+    table.clear(t, 0, 0, 8, 3)
+    f_cellHdr(0, "TF")
+    table.cell(t, 0, 1, "Cont",  text_color = color.silver, text_size = size.small)
+    table.cell(t, 0, 2, "Strat", text_color = color.silver, text_size = size.small)
+    int c = 1
+    if on15
+        f_col(c, "15m", o15, c15, k15)
+        c += 1
+    if on60
+        f_col(c, "1H", o60, c60, k60)
+        c += 1
+    if on240
+        f_col(c, "4H", o240, c240, k240)
+        c += 1
+    if onD
+        f_col(c, "D", oD, cD, kD)
+        c += 1
+    if onW
+        f_col(c, "W", oW, cW, kW)
+        c += 1
+    if onM
+        f_col(c, "M", oM, cM, kM)
+        c += 1
+    if onQ
+        f_col(c, "Q", oQ, cQ, kQ)
+        c += 1
+    if onY
+        f_col(c, "Y", oY, cY, kY)
+        c += 1
+    // Summary row: FTFC status + current chart combo
+    string combo = f_name(code[2]) + "-" + f_name(code[1]) + "-" + f_name(code)
+    string ftfcTxt = ftfcBull ? "FTFC ▲ BULL" : ftfcBear ? "FTFC ▼ BEAR" :
+         "Mixed  ▲" + str.tostring(bullCnt) + " / ▼" + str.tostring(bearCnt)
+    color ftfcCol = ftfcBull ? color.new(colUp, 15) : ftfcBear ? color.new(colDown, 15) : color.new(color.gray, 35)
+    if c > 1 and not tblMerged
+        table.merge_cells(t, 0, 3, c - 1, 3)
+        tblMerged := true
+    table.cell(t, 0, 3, ftfcTxt + "   |   " + combo, text_color = color.white,
+         text_size = size.small, bgcolor = ftfcCol)
+
+// ═════════════════════════════════ ALERTS ═══════════════════════════════════
+bool confirmed = barstate.isconfirmed
+alertcondition(confirmed and bullRev,               "Strat: Bullish reversal",     "TheStrat — bullish reversal trigger fired (2-2 / 2-1-2 / 3-2-2 / 1-2-2 family)")
+alertcondition(confirmed and bearRev,               "Strat: Bearish reversal",     "TheStrat — bearish reversal trigger fired (2-2 / 2-1-2 / 3-2-2 / 1-2-2 family)")
+alertcondition(confirmed and bullCont,              "Strat: Bullish continuation", "TheStrat — bullish 2-2 continuation")
+alertcondition(confirmed and bearCont,              "Strat: Bearish continuation", "TheStrat — bearish 2-2 continuation")
+alertcondition(confirmed and code == 1,             "Strat: Inside bar (1)",       "TheStrat — inside bar: actionable setup forming")
+alertcondition(confirmed and code == 3,             "Strat: Outside bar (3)",      "TheStrat — outside bar printed")
+alertcondition(confirmed and hammer,                "Strat: Hammer",               "TheStrat — hammer candle")
+alertcondition(confirmed and shooter,               "Strat: Shooter",              "TheStrat — shooter candle")
+alertcondition(confirmed and pmgBull,               "Strat: PMG bullish",          "TheStrat — Pivot Machine Gun: lower-high string broken to the upside")
+alertcondition(confirmed and pmgBear,               "Strat: PMG bearish",          "TheStrat — Pivot Machine Gun: higher-low string broken to the downside")
+alertcondition(ftfcBull and not ftfcBull[1],        "Strat: FTFC turned bullish",  "TheStrat — full timeframe continuity is now bullish")
+alertcondition(ftfcBear and not ftfcBear[1],        "Strat: FTFC turned bearish",  "TheStrat — full timeframe continuity is now bearish")
