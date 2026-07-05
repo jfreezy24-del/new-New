@@ -180,8 +180,7 @@ if bullTrig and not na(code[1])
     if code[1] == 1
         bullName := f_name(code[2]) + "-1-2U"                    // 2-1-2, 3-1-2, 1-1-2 (or X-1-3)
     else if code[1] == -2 and code == 2
-        bullName := code[2] == 1 ? "1-2-2 RevStrat" :
-                    code[2] == 3 ? "3-2-2 Bull"     : "2-2 Bull Rev"
+        bullName := code[2] == 1 ? "1-2-2 RevStrat" : code[2] == 3 ? "3-2-2 Bull" : "2-2 Bull Rev"
     else if code[1] == -2 and code == 3
         bullName := "2-3 Bull"
 
@@ -190,8 +189,7 @@ if bearTrig and not na(code[1])
     if code[1] == 1
         bearName := f_name(code[2]) + "-1-2D"
     else if code[1] == 2 and code == -2
-        bearName := code[2] == 1 ? "1-2-2 RevStrat" :
-                    code[2] == 3 ? "3-2-2 Bear"     : "2-2 Bear Rev"
+        bearName := code[2] == 1 ? "1-2-2 RevStrat" : code[2] == 3 ? "3-2-2 Bear" : "2-2 Bear Rev"
     else if code[1] == 2 and code == 3
         bearName := "2-3 Bear"
 
