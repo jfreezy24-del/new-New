@@ -26,13 +26,21 @@ ftfcFilter  = input.string("Off", "FTFC filter for signals", options = ["Off", "
      tooltip = "Majority: signal only when most enabled timeframes agree with its direction.\n" +
                "Strict: signal only under full timeframe continuity.", group = grpSig)
 showAplus   = input.bool(true,  "Grade A+ setups (★ = hammer/shooter + FTFC majority)", group = grpSig)
+showRR      = input.bool(true,  "Show risk:reward on signal labels",
+     tooltip = "Entry = setup bar break, stop = pattern opposite extreme, reward = first magnitude.", group = grpSig)
 showHamSho  = input.bool(true,  "Show hammers / shooters",                            group = grpSig)
 showPMG     = input.bool(true,  "Show Pivot Machine Gun (PMG)",                       group = grpSig)
 pmgLen      = input.int(5,      "PMG: consecutive higher lows / lower highs", minval = 3, maxval = 15, group = grpSig)
 
 grpMag = "Magnitude Targets"
 showTargets = input.bool(true, "Draw magnitude target lines on reversal triggers", group = grpMag)
+magLevels   = input.int(3, "Magnitude levels (1 = pattern, 2-3 = prior pivots)", minval = 1, maxval = 3, group = grpMag)
 tgtBars     = input.int(40, "Expire target after N bars", minval = 5, maxval = 200, group = grpMag)
+
+grpBF = "Broadening Formation"
+showBF   = input.bool(true, "Detect broadening formations", group = grpBF)
+pvtLen   = input.int(3, "Pivot strength (bars each side)", minval = 2, maxval = 10, group = grpBF)
+bfMaxAge = input.int(100, "Max pivot age for an active BF (bars)", minval = 20, maxval = 500, group = grpBF)
 
 grpMother = "Mother Bar (compound inside range)"
 showMother  = input.bool(true, "Draw mother-bar range boxes", group = grpMother)
@@ -197,12 +205,20 @@ bool bearCont = code == -2 and code[1] == -2 and f_pass(-1)
 bool aPlusBull = showAplus and bullRev and (hammer  or hammer[1])  and bullCnt > bearCnt
 bool aPlusBear = showAplus and bearRev and (shooter or shooter[1]) and bearCnt > bullCnt
 
+// R:R — entry = setup-bar break, stop = pattern opposite extreme, reward = first magnitude
+f_rrTxt(float entry, float stop, float tgt, bool isBull) =>
+    risk   = isBull ? entry - stop : stop - entry
+    reward = isBull ? tgt - entry  : entry - tgt
+    risk > 0 and reward > 0 ? "\nR:R " + str.tostring(reward / risk, "#.##") : ""
+
 if showRev and bullRev and barstate.isconfirmed
-    label.new(bar_index, low, bullName + (aPlusBull ? " ★" : ""), style = label.style_label_up,
+    rrTxt = showRR ? f_rrTxt(high[1], math.min(low, low[1]), math.max(high[1], nz(high[2], high[1])), true) : ""
+    label.new(bar_index, low, bullName + (aPlusBull ? " ★" : "") + rrTxt, style = label.style_label_up,
          color = color.new(colUp, 15), textcolor = color.white,
          size = aPlusBull ? size.normal : size.small)
 if showRev and bearRev and barstate.isconfirmed
-    label.new(bar_index, high, bearName + (aPlusBear ? " ★" : ""), style = label.style_label_down,
+    rrTxt = showRR ? f_rrTxt(low[1], math.max(high, high[1]), math.min(low[1], nz(low[2], low[1])), false) : ""
+    label.new(bar_index, high, bearName + (aPlusBear ? " ★" : "") + rrTxt, style = label.style_label_down,
          color = color.new(colDown, 15), textcolor = color.white,
          size = aPlusBear ? size.normal : size.small)
 
@@ -226,6 +242,75 @@ if showPMG and pmgBull and barstate.isconfirmed
 if showPMG and pmgBear and barstate.isconfirmed
     label.new(bar_index, high, "PMG ▼", style = label.style_label_down,
          color = color.new(color.maroon, 0), textcolor = color.white, size = size.small)
+
+// ═══════════════ PIVOT TRACKING & BROADENING FORMATION ══════════════════════
+float ph = ta.pivothigh(high, pvtLen, pvtLen)
+float pl = ta.pivotlow(low, pvtLen, pvtLen)
+
+var array<float> pvHiPx  = array.new<float>()
+var array<int>   pvHiBar = array.new<int>()
+var array<float> pvLoPx  = array.new<float>()
+var array<int>   pvLoBar = array.new<int>()
+
+if not na(ph)
+    array.push(pvHiPx, ph)
+    array.push(pvHiBar, bar_index - pvtLen)
+    if array.size(pvHiPx) > 8
+        array.shift(pvHiPx)
+        array.shift(pvHiBar)
+if not na(pl)
+    array.push(pvLoPx, pl)
+    array.push(pvLoBar, bar_index - pvtLen)
+    if array.size(pvLoPx) > 8
+        array.shift(pvLoPx)
+        array.shift(pvLoBar)
+
+// BF = latest two pivot highs rising while latest two pivot lows are falling
+bool  bfActive = false
+float bfH1 = na
+float bfH2 = na
+int   bfHB1 = na
+int   bfHB2 = na
+float bfL1 = na
+float bfL2 = na
+int   bfLB1 = na
+int   bfLB2 = na
+if array.size(pvHiPx) >= 2 and array.size(pvLoPx) >= 2
+    nH = array.size(pvHiPx)
+    nL = array.size(pvLoPx)
+    bfH1  := array.get(pvHiPx, nH - 2)
+    bfH2  := array.get(pvHiPx, nH - 1)
+    bfHB1 := array.get(pvHiBar, nH - 2)
+    bfHB2 := array.get(pvHiBar, nH - 1)
+    bfL1  := array.get(pvLoPx, nL - 2)
+    bfL2  := array.get(pvLoPx, nL - 1)
+    bfLB1 := array.get(pvLoBar, nL - 2)
+    bfLB2 := array.get(pvLoBar, nL - 1)
+    fresh = bar_index - math.max(bfHB2, bfLB2) <= bfMaxAge
+    bfActive := bfH2 > bfH1 and bfL2 < bfL1 and fresh
+bool bfNew = bfActive and not bfActive[1]
+
+var line bfUp = na
+var line bfDn = na
+if showBF
+    if bfActive
+        // redraw whenever a new pivot can change the structure
+        if bfNew or not na(ph) or not na(pl)
+            line.delete(bfUp)
+            line.delete(bfDn)
+            bfUp := line.new(bfHB1, bfH1, bfHB2, bfH2, extend = extend.right,
+                 color = color.new(colOutside, 25), width = 1)
+            bfDn := line.new(bfLB1, bfL1, bfLB2, bfL2, extend = extend.right,
+                 color = color.new(colOutside, 25), width = 1)
+    else if not na(bfUp)
+        line.delete(bfUp)
+        line.delete(bfDn)
+        bfUp := na
+        bfDn := na
+
+if showBF and bfNew and barstate.isconfirmed
+    label.new(bar_index, high, "BF", style = label.style_label_down,
+         color = color.new(colOutside, 20), textcolor = color.white, size = size.small)
 
 // ═══════════════════ INSIDE-BAR TRIGGER LINES (actionable) ══════════════════
 var array<line>  trigLn    = array.new<line>()
@@ -289,9 +374,11 @@ if array.size(tgtLn) > 0
             array.remove(tgtBull, i)
             array.remove(tgtBorn, i)
 
-f_addTgt(float px, bool isB) =>
+f_addTgt(float px, bool isB, int lvl) =>
+    // M1 solid-bright, M2/M3 progressively fainter
+    tcol = color.new(isB ? colUp : colDown, lvl == 1 ? 0 : lvl == 2 ? 35 : 60)
     array.push(tgtLn, line.new(bar_index, px, bar_index + 1, px,
-         color = isB ? colUp : colDown, style = line.style_dotted, width = 1))
+         color = tcol, style = line.style_dotted, width = 1))
     array.push(tgtPx, px)
     array.push(tgtBull, isB)
     array.push(tgtBorn, bar_index)
@@ -300,11 +387,35 @@ if showTargets and barstate.isconfirmed
     if bullRev
         bullTgt = math.max(high[1], nz(high[2], high[1]))
         if bullTgt > high
-            f_addTgt(bullTgt, true)
+            f_addTgt(bullTgt, true, 1)
+        // M2 / M3: successively higher prior pivot highs
+        if magLevels >= 2 and array.size(pvHiPx) > 0
+            float lastLvl = math.max(bullTgt, high)
+            int lvl = 2
+            for i = array.size(pvHiPx) - 1 to 0
+                px = array.get(pvHiPx, i)
+                if px > lastLvl
+                    f_addTgt(px, true, lvl)
+                    lastLvl := px
+                    lvl += 1
+                if lvl > magLevels
+                    break
     if bearRev
         bearTgt = math.min(low[1], nz(low[2], low[1]))
         if bearTgt < low
-            f_addTgt(bearTgt, false)
+            f_addTgt(bearTgt, false, 1)
+        // M2 / M3: successively lower prior pivot lows
+        if magLevels >= 2 and array.size(pvLoPx) > 0
+            float lastLvl = math.min(bearTgt, low)
+            int lvl = 2
+            for i = array.size(pvLoPx) - 1 to 0
+                px = array.get(pvLoPx, i)
+                if px < lastLvl
+                    f_addTgt(px, false, lvl)
+                    lastLvl := px
+                    lvl += 1
+                if lvl > magLevels
+                    break
 
 // ═══════════════════ MOTHER BAR RANGE (compound inside bars) ════════════════
 var bool  mActive = false
@@ -419,6 +530,7 @@ alertcondition(confirmed and hammer,                "Strat: Hammer",            
 alertcondition(confirmed and shooter,               "Strat: Shooter",              "TheStrat — shooter candle")
 alertcondition(confirmed and pmgBull,               "Strat: PMG bullish",          "TheStrat — Pivot Machine Gun: lower-high string broken to the upside")
 alertcondition(confirmed and pmgBear,               "Strat: PMG bearish",          "TheStrat — Pivot Machine Gun: higher-low string broken to the downside")
+alertcondition(confirmed and bfNew,                 "Strat: Broadening formation", "TheStrat — broadening formation detected (rising pivot highs + falling pivot lows)")
 alertcondition(confirmed and tgtHitBull,            "Strat: Bull magnitude hit",   "TheStrat — bullish magnitude target reached")
 alertcondition(confirmed and tgtHitBear,            "Strat: Bear magnitude hit",   "TheStrat — bearish magnitude target reached")
 alertcondition(confirmed and motherBreakUp,         "Strat: Mother bar break up",  "TheStrat — price broke above the mother bar range")

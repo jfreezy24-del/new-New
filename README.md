@@ -14,14 +14,16 @@ A single TradingView Pine Script (v5) indicator that packs the full #TheStrat to
   - Optional `2-2` continuation triangles
 - **FTFC signal filter** — optionally suppress signals that fight the higher timeframes: `Majority` mode requires most enabled timeframes to agree with the signal's direction, `Strict` mode requires full timeframe continuity.
 - **A+ setup grading** — reversal triggers that also print a hammer/shooter (on the setup or trigger bar) while FTFC majority agrees are upgraded with a ★ and a larger label, plus dedicated alerts.
-- **Magnitude target lines** — every reversal trigger projects the pattern's high/low as a dotted first-magnitude target; the line thickens and freezes when hit, or expires after N bars. Alerts fire on target hits.
+- **Magnitude target lines (M1/M2/M3)** — every reversal trigger projects the pattern's high/low as the first-magnitude target, then stacks second and third magnitudes at successively higher/lower prior pivots (progressively fainter lines). Lines thicken and freeze when hit, or expire after N bars. Alerts fire on target hits.
+- **Risk:reward on labels** — signal labels show the R:R of the trade (entry = setup-bar break, stop = pattern opposite extreme, reward = first magnitude).
+- **Broadening formation detection** — when the latest two pivot highs are rising while the latest two pivot lows are falling, the two diverging trendlines are drawn and extended right, a `BF` label marks the detection bar, and an alert fires. Pivot strength and max formation age are configurable.
 - **Mother-bar range boxes** — each inside bar draws its mother bar's range as a box that extends through compound inside bars until price breaks out, with break-up/break-down alerts.
 - **Full Timeframe Continuity (FTFC) table** — live open-vs-price direction for 15m, 1H, 4H, D, W, M, Q, Y (each toggleable), with an overall `FTFC BULL / BEAR / Mixed` summary and the current 3-bar combo string. Timeframes below the chart timeframe can be auto-hidden.
 - **Multi-timeframe strat candles** — the table's `Strat` row shows what candle type (1 / 2U / 2D / 3) each higher timeframe is currently printing.
 - **Pivot Machine Gun (PMG)** — flags when a configurable-length string of higher lows (or lower highs) gets snapped.
 - **Hammers & shooters** — marked with `H` / `S` characters.
 - **Inside-bar trigger lines** — dashed lines drawn from each inside bar's high and low, extended until price breaks them (capped number of active setups).
-- **18 built-in alerts** — bullish/bearish reversals, A+ setups, continuations, inside bar, outside bar, hammer, shooter, PMG bull/bear, magnitude target hits, mother-bar breakouts, and FTFC flipping bullish or bearish.
+- **19 built-in alerts** — bullish/bearish reversals, A+ setups, continuations, inside bar, outside bar, hammer, shooter, PMG bull/bear, broadening formation, magnitude target hits, mother-bar breakouts, and FTFC flipping bullish or bearish.
 
 ## Installation
 
