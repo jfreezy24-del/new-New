@@ -1,0 +1,49 @@
+//@version=6
+// UT Bot — ATR Trailing Stop
+// Recreation of the wildly popular "UT Bot Alerts" concept: an ATR-based
+// trailing stop that flips long/short when price crosses it. Simple to read,
+// hard to write correctly by hand — which is why it's one of the most common
+// Claude requests. Adds an optional EMA trend filter and Heikin Ashi source.
+indicator("UT Bot - ATR Trailing Stop", shorttitle = "UT Bot", overlay = true)
+
+// ── Inputs ──────────────────────────────────────────────────────────────────
+keyValue  = input.float(1.0, "Sensitivity (Key Value)", minval = 0.1, step = 0.1, tooltip = "ATR multiplier — lower = more signals, higher = fewer")
+atrPeriod = input.int(10, "ATR Period", minval = 1)
+useHeikin = input.bool(false, "Use Heikin Ashi Close for Signals", tooltip = "Smooths the signal source; the trailing stop still plots on your normal chart")
+
+useEmaFilter = input.bool(false, "Use EMA Trend Filter", group = "Trend Filter")
+emaFilterLen = input.int(200, "Filter EMA Length", minval = 1, group = "Trend Filter", tooltip = "Longs only above this EMA, shorts only below")
+
+showLabels   = input.bool(true, "Show Buy/Sell Labels", group = "Display")
+colorBars    = input.bool(false, "Color Bars by Position", group = "Display")
+
+// ── Source & trailing stop ──────────────────────────────────────────────────
+haClose = request.security(ticker.heikinashi(syminfo.tickerid), timeframe.period, close, lookahead = barmerge.lookahead_off)
+src = useHeikin ? haClose : close
+
+nLoss = keyValue * ta.atr(atrPeriod)
+
+var float ts = na
+ts := src > nz(ts[1], src) and src[1] > nz(ts[1], src) ? math.max(nz(ts[1]), src - nLoss) :
+     src < nz(ts[1], src) and src[1] < nz(ts[1], src) ? math.min(nz(ts[1]), src + nLoss) :
+     src > nz(ts[1], src) ? src - nLoss : src + nLoss
+
+longPos = src > ts
+
+// ── Signals ─────────────────────────────────────────────────────────────────
+emaF = ta.ema(close, emaFilterLen)
+buySignal  = ta.crossover(src, ts)  and (not useEmaFilter or close > emaF)
+sellSignal = ta.crossunder(src, ts) and (not useEmaFilter or close < emaF)
+
+// ── Plots ───────────────────────────────────────────────────────────────────
+plot(ts, "ATR Trailing Stop", color = longPos ? color.new(color.teal, 0) : color.new(color.orange, 0), linewidth = 2, style = plot.style_linebr)
+plot(useEmaFilter ? emaF : na, "Filter EMA", color = color.new(color.gray, 40))
+
+plotshape(showLabels and buySignal,  "Buy",  shape.labelup,   location.belowbar, color.new(color.teal, 0),   text = "Buy",  textcolor = color.white, size = size.small)
+plotshape(showLabels and sellSignal, "Sell", shape.labeldown, location.abovebar, color.new(color.orange, 0), text = "Sell", textcolor = color.white, size = size.small)
+
+barcolor(colorBars ? (longPos ? color.new(color.teal, 20) : color.new(color.orange, 20)) : na)
+
+// ── Alerts ──────────────────────────────────────────────────────────────────
+alertcondition(buySignal,  "UT Bot Buy",  "UT Bot: BUY {{ticker}} ({{interval}}) — price crossed above ATR trailing stop")
+alertcondition(sellSignal, "UT Bot Sell", "UT Bot: SELL {{ticker}} ({{interval}}) — price crossed below ATR trailing stop")

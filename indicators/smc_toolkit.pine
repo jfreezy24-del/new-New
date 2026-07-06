@@ -1,0 +1,138 @@
+//@version=6
+// Smart Money Concepts Lite
+// SMC toolkits are among the most popular scripts on TradingView, and by far
+// the most common "complex" indicator people ask Claude to build. This lite
+// recreation covers the three core concepts:
+//   - Market structure: Break of Structure (BOS) and Change of Character (CHoCH)
+//   - Order Blocks: the last opposing candle before a structure break
+//   - Fair Value Gaps: three-candle imbalances that price tends to revisit
+indicator("Smart Money Concepts Lite", shorttitle = "SMC Lite", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
+
+// ── Inputs ──────────────────────────────────────────────────────────────────
+swingLen      = input.int(10, "Swing Detection Length", minval = 2, group = "Market Structure", tooltip = "Bars on each side required to confirm a swing high/low")
+showStructure = input.bool(true, "Show BOS / CHoCH", group = "Market Structure")
+
+showOB = input.bool(true, "Show Order Blocks", group = "Order Blocks")
+maxOB  = input.int(5, "Max Order Blocks per Side", minval = 1, maxval = 20, group = "Order Blocks")
+
+showFVG   = input.bool(true, "Show Fair Value Gaps", group = "Fair Value Gaps")
+maxFVG    = input.int(10, "Max FVGs per Side", minval = 1, maxval = 50, group = "Fair Value Gaps")
+shrinkFVG = input.bool(true, "Shrink FVGs on Partial Fill", group = "Fair Value Gaps")
+
+colBull = color.teal
+colBear = color.orange
+
+// ── Swing detection ─────────────────────────────────────────────────────────
+ph = ta.pivothigh(high, swingLen, swingLen)
+pl = ta.pivotlow(low, swingLen, swingLen)
+
+var float lastHigh    = na
+var int   lastHighBar = na
+var bool  highTaken   = true
+var float lastLow     = na
+var int   lastLowBar  = na
+var bool  lowTaken    = true
+var int   trend       = 0 // 1 = bullish structure, -1 = bearish structure
+
+if not na(ph)
+    lastHigh    := ph
+    lastHighBar := bar_index - swingLen
+    highTaken   := false
+if not na(pl)
+    lastLow    := pl
+    lastLowBar := bar_index - swingLen
+    lowTaken   := false
+
+// ── Order block storage ─────────────────────────────────────────────────────
+var array<box> bullOB = array.new<box>()
+var array<box> bearOB = array.new<box>()
+
+// Find the most recent candle opposing the break direction (the order block)
+f_lastOppCandle(bool bullish) =>
+    idx = 0
+    for i = 1 to 50
+        if bullish ? close[i] < open[i] : close[i] > open[i]
+            idx := i
+            break
+    idx
+
+// ── Structure breaks ────────────────────────────────────────────────────────
+bullBreak = showStructure and not highTaken and not na(lastHigh) and close > lastHigh
+bearBreak = showStructure and not lowTaken  and not na(lastLow)  and close < lastLow
+
+if bullBreak
+    highTaken := true
+    isChoch = trend == -1
+    trend := 1
+    line.new(lastHighBar, lastHigh, bar_index, lastHigh, color = color.new(colBull, 30), style = line.style_dashed)
+    label.new(bar_index, lastHigh, isChoch ? "CHoCH" : "BOS", style = label.style_label_down, color = color.new(colBull, 100), textcolor = colBull, size = size.small)
+    if showOB
+        idx = f_lastOppCandle(true)
+        if idx > 0
+            array.push(bullOB, box.new(bar_index - idx, high[idx], bar_index, low[idx], border_color = color.new(colBull, 60), bgcolor = color.new(colBull, 85), extend = extend.right))
+            if array.size(bullOB) > maxOB
+                box.delete(array.shift(bullOB))
+
+if bearBreak
+    lowTaken := true
+    isChoch = trend == 1
+    trend := -1
+    line.new(lastLowBar, lastLow, bar_index, lastLow, color = color.new(colBear, 30), style = line.style_dashed)
+    label.new(bar_index, lastLow, isChoch ? "CHoCH" : "BOS", style = label.style_label_up, color = color.new(colBear, 100), textcolor = colBear, size = size.small)
+    if showOB
+        idx = f_lastOppCandle(false)
+        if idx > 0
+            array.push(bearOB, box.new(bar_index - idx, high[idx], bar_index, low[idx], border_color = color.new(colBear, 60), bgcolor = color.new(colBear, 85), extend = extend.right))
+            if array.size(bearOB) > maxOB
+                box.delete(array.shift(bearOB))
+
+// ── Order block mitigation (price closes through the far side) ──────────────
+if array.size(bullOB) > 0
+    for i = array.size(bullOB) - 1 to 0
+        b = array.get(bullOB, i)
+        if close < box.get_bottom(b)
+            box.delete(b)
+            array.remove(bullOB, i)
+if array.size(bearOB) > 0
+    for i = array.size(bearOB) - 1 to 0
+        b = array.get(bearOB, i)
+        if close > box.get_top(b)
+            box.delete(b)
+            array.remove(bearOB, i)
+
+// ── Fair value gaps ─────────────────────────────────────────────────────────
+var array<box> bullFVG = array.new<box>()
+var array<box> bearFVG = array.new<box>()
+
+if showFVG and low > high[2]
+    array.push(bullFVG, box.new(bar_index - 2, low, bar_index, high[2], border_color = na, bgcolor = color.new(colBull, 80)))
+    if array.size(bullFVG) > maxFVG
+        box.delete(array.shift(bullFVG))
+if showFVG and high < low[2]
+    array.push(bearFVG, box.new(bar_index - 2, low[2], bar_index, high, border_color = na, bgcolor = color.new(colBear, 80)))
+    if array.size(bearFVG) > maxFVG
+        box.delete(array.shift(bearFVG))
+
+// Extend open gaps to the current bar; shrink on partial fill, delete when filled
+if array.size(bullFVG) > 0
+    for i = array.size(bullFVG) - 1 to 0
+        b = array.get(bullFVG, i)
+        box.set_right(b, bar_index)
+        if low <= box.get_bottom(b)
+            box.delete(b)
+            array.remove(bullFVG, i)
+        else if shrinkFVG and low < box.get_top(b)
+            box.set_top(b, low)
+if array.size(bearFVG) > 0
+    for i = array.size(bearFVG) - 1 to 0
+        b = array.get(bearFVG, i)
+        box.set_right(b, bar_index)
+        if high >= box.get_top(b)
+            box.delete(b)
+            array.remove(bearFVG, i)
+        else if shrinkFVG and high > box.get_bottom(b)
+            box.set_bottom(b, high)
+
+// ── Alerts ──────────────────────────────────────────────────────────────────
+alertcondition(bullBreak, "Bullish Structure Break", "SMC: bullish BOS/CHoCH on {{ticker}} ({{interval}})")
+alertcondition(bearBreak, "Bearish Structure Break", "SMC: bearish BOS/CHoCH on {{ticker}} ({{interval}})")

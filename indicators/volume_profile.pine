@@ -1,0 +1,102 @@
+//@version=6
+// Rolling Volume Profile
+// Volume profile scripts are perennially among TradingView's most popular, and
+// a frequent "Claude, build me one without paying for Premium" request. This
+// recreation bins the last N bars' volume into price rows, draws the histogram
+// at the right edge, and marks the Point of Control (POC) and the 70% Value
+// Area (VAH/VAL).
+indicator("Rolling Volume Profile", shorttitle = "Vol Profile", overlay = true, max_boxes_count = 500, max_lines_count = 20, max_bars_back = 500)
+
+// ── Inputs ──────────────────────────────────────────────────────────────────
+lookback = input.int(200, "Lookback (bars)", minval = 10, maxval = 500, group = "Profile")
+rows     = input.int(24, "Price Rows", minval = 5, maxval = 100, group = "Profile")
+vaPct    = input.float(0.70, "Value Area %", minval = 0.5, maxval = 0.95, step = 0.05, group = "Profile")
+
+maxWidth   = input.int(30, "Max Histogram Width (bars)", minval = 5, maxval = 100, group = "Display")
+showPOC    = input.bool(true, "Show POC Line", group = "Display")
+showVA     = input.bool(true, "Show Value Area High/Low Lines", group = "Display")
+showLbls   = input.bool(true, "Show POC/VAH/VAL Labels", group = "Display")
+
+colProfile = color.new(color.gray, 55)
+colOutside = color.new(color.gray, 82)
+colPOC     = color.new(color.teal, 20)
+
+// ── Profile range (computed every bar so series stay consistent) ────────────
+profHi = ta.highest(high, lookback)
+profLo = ta.lowest(low, lookback)
+
+// ── Drawing storage ─────────────────────────────────────────────────────────
+var array<box>   profBoxes = array.new<box>()
+var array<line>  profLines = array.new<line>()
+var array<label> profLbls  = array.new<label>()
+
+if barstate.islast and profHi > profLo
+    // Clear previous render
+    while array.size(profBoxes) > 0
+        box.delete(array.pop(profBoxes))
+    while array.size(profLines) > 0
+        line.delete(array.pop(profLines))
+    while array.size(profLbls) > 0
+        label.delete(array.pop(profLbls))
+
+    lb   = math.min(lookback, bar_index + 1)
+    step = (profHi - profLo) / rows
+
+    // Bin each bar's volume across the rows its range spans
+    vols = array.new<float>(rows, 0.0)
+    for i = 0 to lb - 1
+        r1 = math.max(0, math.min(rows - 1, int(math.floor((low[i]  - profLo) / step))))
+        r2 = math.max(0, math.min(rows - 1, int(math.floor((high[i] - profLo) / step))))
+        share = volume[i] / (r2 - r1 + 1)
+        for r = r1 to r2
+            array.set(vols, r, array.get(vols, r) + share)
+
+    totalVol = array.sum(vols)
+    maxVol   = array.max(vols)
+    pocRow   = array.indexof(vols, maxVol)
+
+    // Value area: expand row-by-row from the POC, taking the larger neighbor,
+    // until the target share of total volume is covered
+    vaVol = array.get(vols, pocRow)
+    up = pocRow + 1
+    dn = pocRow - 1
+    while vaVol < totalVol * vaPct and (up < rows or dn >= 0)
+        vUp = up < rows ? array.get(vols, up) : -1.0
+        vDn = dn >= 0   ? array.get(vols, dn) : -1.0
+        if vUp >= vDn
+            vaVol += vUp
+            up += 1
+        else
+            vaVol += vDn
+            dn -= 1
+    vaHiRow = up - 1
+    vaLoRow = dn + 1
+
+    // Histogram
+    for r = 0 to rows - 1
+        v = array.get(vols, r)
+        if v > 0 and maxVol > 0
+            w  = math.max(1, math.round(maxWidth * v / maxVol))
+            y0 = profLo + step * r
+            inVA = r >= vaLoRow and r <= vaHiRow
+            col = r == pocRow ? colPOC : inVA ? colProfile : colOutside
+            array.push(profBoxes, box.new(bar_index + 2, y0 + step, bar_index + 2 + w, y0, border_color = na, bgcolor = col))
+
+    // POC / VAH / VAL lines and labels
+    pocPrice = profLo + step * (pocRow + 0.5)
+    vahPrice = profLo + step * (vaHiRow + 1)
+    valPrice = profLo + step * vaLoRow
+    leftBar  = bar_index - lb + 1
+
+    if showPOC
+        array.push(profLines, line.new(leftBar, pocPrice, bar_index + 2 + maxWidth, pocPrice, color = color.new(color.teal, 0), width = 2))
+    if showVA
+        array.push(profLines, line.new(leftBar, vahPrice, bar_index + 2 + maxWidth, vahPrice, color = color.new(color.orange, 40), style = line.style_dashed))
+        array.push(profLines, line.new(leftBar, valPrice, bar_index + 2 + maxWidth, valPrice, color = color.new(color.orange, 40), style = line.style_dashed))
+    if showLbls
+        x = bar_index + 3 + maxWidth
+        if showPOC
+            array.push(profLbls, label.new(x, pocPrice, "POC " + str.tostring(pocPrice, format.mintick), style = label.style_label_left, color = color.new(color.teal, 80), textcolor = color.white, size = size.small))
+        if showVA
+            array.push(profLbls, label.new(x, vahPrice, "VAH " + str.tostring(vahPrice, format.mintick), style = label.style_label_left, color = color.new(color.gray, 80), textcolor = color.white, size = size.small))
+            array.push(profLbls, label.new(x, valPrice, "VAL " + str.tostring(valPrice, format.mintick), style = label.style_label_left, color = color.new(color.gray, 80), textcolor = color.white, size = size.small))

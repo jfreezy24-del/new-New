@@ -1,0 +1,52 @@
+//@version=6
+// Squeeze Momentum
+// A recreation of one of the most-copied indicators in TradingView history
+// (LazyBear's take on the TTM Squeeze). Detects volatility compression —
+// Bollinger Bands trading inside Keltner Channels — and pairs it with a
+// linear-regression momentum histogram so you can see which way the squeeze
+// is likely to fire.
+indicator("Squeeze Momentum", shorttitle = "SQZ MOM", overlay = false)
+
+// ── Inputs ──────────────────────────────────────────────────────────────────
+bbLen  = input.int(20, "Bollinger Band Length", minval = 1, group = "Bollinger Bands")
+bbMult = input.float(2.0, "Bollinger Band Multiplier", minval = 0.1, step = 0.1, group = "Bollinger Bands")
+
+kcLen  = input.int(20, "Keltner Channel Length", minval = 1, group = "Keltner Channels")
+kcMult = input.float(1.5, "Keltner Channel Multiplier", minval = 0.1, step = 0.1, group = "Keltner Channels")
+useTR  = input.bool(true, "Use True Range for Keltner", group = "Keltner Channels")
+
+// ── Squeeze detection ───────────────────────────────────────────────────────
+basis   = ta.sma(close, bbLen)
+dev     = bbMult * ta.stdev(close, bbLen)
+upperBB = basis + dev
+lowerBB = basis - dev
+
+ma      = ta.sma(close, kcLen)
+kcRange = ta.sma(useTR ? ta.tr : high - low, kcLen)
+upperKC = ma + kcRange * kcMult
+lowerKC = ma - kcRange * kcMult
+
+sqzOn  = lowerBB > lowerKC and upperBB < upperKC // volatility compressed
+sqzOff = lowerBB < lowerKC and upperBB > upperKC // volatility expanding
+noSqz  = not sqzOn and not sqzOff
+
+// ── Momentum: linear regression of price vs its mean-of-extremes midline ────
+mid = math.avg(math.avg(ta.highest(high, kcLen), ta.lowest(low, kcLen)), ta.sma(close, kcLen))
+mom = ta.linreg(close - mid, kcLen, 0)
+
+// ── Plots ───────────────────────────────────────────────────────────────────
+histCol = mom > 0 ?
+     (mom > mom[1] ? color.new(color.teal, 0)   : color.new(color.teal, 55)) :
+     (mom < mom[1] ? color.new(color.orange, 0) : color.new(color.orange, 55))
+plot(mom, "Momentum", color = histCol, style = plot.style_columns)
+
+// Zero-line crosses: orange while squeezed, gray when firing, dim when neither
+zeroCol = sqzOn ? color.new(color.yellow, 0) : sqzOff ? color.new(color.gray, 0) : color.new(color.gray, 60)
+plot(0, "Squeeze State", color = zeroCol, style = plot.style_cross, linewidth = 2)
+
+// ── Signals & alerts ────────────────────────────────────────────────────────
+squeezeFired = sqzOff and sqzOn[1]
+plotshape(squeezeFired, "Squeeze Fired", shape.diamond, location.bottom, mom > 0 ? color.new(color.teal, 0) : color.new(color.orange, 0), size = size.tiny)
+
+alertcondition(sqzOn and not sqzOn[1], "Squeeze Started", "SQZ MOM: squeeze forming on {{ticker}} ({{interval}})")
+alertcondition(squeezeFired,           "Squeeze Fired",   "SQZ MOM: squeeze FIRED on {{ticker}} ({{interval}}) — check histogram direction")

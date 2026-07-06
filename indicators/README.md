@@ -3,10 +3,10 @@
 TradingView doesn't label community scripts by which AI helped write them, so there is no
 official "top Claude indicators" chart. But across tutorials, community posts, and AI trading
 tool roundups, the same handful of indicator types come up again and again as the things
-traders most often build with Claude. This folder recreates the four most popular ones in
+traders most often build with Claude. This folder recreates the most popular ones in
 **Pine Script v6**.
 
-## The indicators
+## The everyday favorites
 
 | File | Indicator | Why it's popular |
 |------|-----------|------------------|
@@ -14,6 +14,15 @@ traders most often build with Claude. This folder recreates the four most popula
 | `multi_timeframe_dashboard.pine` | **Multi-Timeframe Trend Dashboard** | A corner table showing trend, RSI, and MACD across five timeframes with a confluence score — the most-requested "give me everything at a glance" build. |
 | `rsi_divergence_detector.pine` | **RSI Divergence Detector** | Auto-detects regular and hidden bullish/bearish divergences between price and RSI using pivot points. Divergence logic is fiddly to write by hand, so it's a top ask. |
 | `key_intraday_levels.pine` | **Key Intraday Levels** | Previous day high/low/close, today's open, opening range, and session VWAP in one overlay — the "all my key levels in one place" build that went viral as a Claude use case. |
+
+## The complex heavyweights
+
+| File | Indicator | Why it's popular |
+|------|-----------|------------------|
+| `smc_toolkit.pine` | **Smart Money Concepts Lite** | SMC toolkits are among the most-liked scripts in TradingView history. Detects market structure breaks (BOS/CHoCH), draws order blocks that auto-remove when mitigated, and tracks fair value gaps that shrink as they fill. |
+| `squeeze_momentum.pine` | **Squeeze Momentum** | A recreation of LazyBear's take on the TTM Squeeze — one of the most-copied indicators ever. Flags volatility compression (Bollinger Bands inside Keltner Channels) with a momentum histogram showing likely breakout direction. |
+| `ut_bot_atr_trailing_stop.pine` | **UT Bot — ATR Trailing Stop** | The famous "UT Bot Alerts" concept: an ATR trailing stop that flips long/short on cross, with optional Heikin Ashi smoothing and a 200 EMA trend filter. A staple of alert-driven and automated setups. |
+| `volume_profile.pine` | **Rolling Volume Profile** | Bins the last N bars' volume into price rows and draws the histogram with Point of Control and 70% Value Area lines — the classic "recreate a Premium feature" request. |
 
 ## How to use
 
