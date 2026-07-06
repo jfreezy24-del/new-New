@@ -1,0 +1,67 @@
+//@version=6
+// RSI Divergence Detector
+// A perennial "build this with Claude" favorite: automatically finds regular and
+// hidden bullish/bearish divergences between price and RSI using pivot points.
+// Regular divergence = potential reversal; hidden divergence = trend continuation.
+indicator("RSI Divergence Detector", shorttitle = "RSI Div", overlay = false)
+
+// ── Inputs ──────────────────────────────────────────────────────────────────
+rsiLen     = input.int(14, "RSI Length", minval = 1, group = "RSI")
+rsiSrc     = input.source(close, "RSI Source", group = "RSI")
+
+lbL        = input.int(5,  "Pivot Lookback Left",  minval = 1, group = "Pivots")
+lbR        = input.int(5,  "Pivot Lookback Right", minval = 1, group = "Pivots", tooltip = "Signals confirm this many bars after the pivot — larger = more reliable but later")
+rangeLower = input.int(5,  "Min Bars Between Pivots", minval = 1, group = "Pivots")
+rangeUpper = input.int(60, "Max Bars Between Pivots", minval = 2, group = "Pivots")
+
+showBullReg = input.bool(true,  "Regular Bullish (reversal up)",      group = "Divergences")
+showBearReg = input.bool(true,  "Regular Bearish (reversal down)",    group = "Divergences")
+showBullHid = input.bool(false, "Hidden Bullish (continuation up)",   group = "Divergences")
+showBearHid = input.bool(false, "Hidden Bearish (continuation down)", group = "Divergences")
+
+// ── RSI ─────────────────────────────────────────────────────────────────────
+osc = ta.rsi(rsiSrc, rsiLen)
+
+plot(osc, "RSI", color = color.new(color.gray, 0), linewidth = 2)
+hline(70, "Overbought", color = color.new(color.orange, 50))
+hline(50, "Midline",    color = color.new(color.gray, 70))
+hline(30, "Oversold",   color = color.new(color.teal, 50))
+
+// ── Pivot detection ─────────────────────────────────────────────────────────
+plFound = not na(ta.pivotlow(osc, lbL, lbR))
+phFound = not na(ta.pivothigh(osc, lbL, lbR))
+
+barsSincePl = ta.barssince(plFound[1])
+barsSincePh = ta.barssince(phFound[1])
+plInRange = rangeLower <= barsSincePl + 1 and barsSincePl + 1 <= rangeUpper
+phInRange = rangeLower <= barsSincePh + 1 and barsSincePh + 1 <= rangeUpper
+
+prevPlOsc   = ta.valuewhen(plFound, osc[lbR], 1)
+prevPlPrice = ta.valuewhen(plFound, low[lbR], 1)
+prevPhOsc   = ta.valuewhen(phFound, osc[lbR], 1)
+prevPhPrice = ta.valuewhen(phFound, high[lbR], 1)
+
+// ── Divergence conditions ───────────────────────────────────────────────────
+// Regular bullish: price makes a lower low, RSI makes a higher low
+bullRegCond = showBullReg and plFound and plInRange and low[lbR] < prevPlPrice and osc[lbR] > prevPlOsc
+// Hidden bullish: price makes a higher low, RSI makes a lower low
+bullHidCond = showBullHid and plFound and plInRange and low[lbR] > prevPlPrice and osc[lbR] < prevPlOsc
+// Regular bearish: price makes a higher high, RSI makes a lower high
+bearRegCond = showBearReg and phFound and phInRange and high[lbR] > prevPhPrice and osc[lbR] < prevPhOsc
+// Hidden bearish: price makes a lower high, RSI makes a higher high
+bearHidCond = showBearHid and phFound and phInRange and high[lbR] < prevPhPrice and osc[lbR] > prevPhOsc
+
+// ── Plots (offset back to the actual pivot bar) ─────────────────────────────
+plot(plFound ? osc[lbR] : na, "Bull Div Line", offset = -lbR, linewidth = 2, color = bullRegCond ? color.new(color.teal, 0) : bullHidCond ? color.new(color.teal, 50) : na)
+plot(phFound ? osc[lbR] : na, "Bear Div Line", offset = -lbR, linewidth = 2, color = bearRegCond ? color.new(color.orange, 0) : bearHidCond ? color.new(color.orange, 50) : na)
+
+plotshape(bullRegCond ? osc[lbR] : na, "Regular Bullish", shape.labelup,   location.absolute, color.new(color.teal, 0),    text = "Bull", textcolor = color.white, offset = -lbR)
+plotshape(bullHidCond ? osc[lbR] : na, "Hidden Bullish",  shape.labelup,   location.absolute, color.new(color.teal, 50),   text = "H",    textcolor = color.white, offset = -lbR)
+plotshape(bearRegCond ? osc[lbR] : na, "Regular Bearish", shape.labeldown, location.absolute, color.new(color.orange, 0),  text = "Bear", textcolor = color.white, offset = -lbR)
+plotshape(bearHidCond ? osc[lbR] : na, "Hidden Bearish",  shape.labeldown, location.absolute, color.new(color.orange, 50), text = "H",    textcolor = color.white, offset = -lbR)
+
+// ── Alerts ──────────────────────────────────────────────────────────────────
+alertcondition(bullRegCond, "Regular Bullish Divergence", "RSI Div: regular BULLISH divergence on {{ticker}} ({{interval}})")
+alertcondition(bearRegCond, "Regular Bearish Divergence", "RSI Div: regular BEARISH divergence on {{ticker}} ({{interval}})")
+alertcondition(bullHidCond, "Hidden Bullish Divergence",  "RSI Div: hidden bullish divergence on {{ticker}} ({{interval}})")
+alertcondition(bearHidCond, "Hidden Bearish Divergence",  "RSI Div: hidden bearish divergence on {{ticker}} ({{interval}})")

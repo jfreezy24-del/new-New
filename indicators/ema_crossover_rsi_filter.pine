@@ -1,0 +1,46 @@
+//@version=6
+// EMA Crossover + RSI Filter
+// The single most common indicator people ask Claude to build: a fast/slow EMA
+// crossover whose signals are filtered by RSI so you don't buy into overbought
+// chop or sell into oversold bounces. Includes alerts and optional trend cloud.
+indicator("EMA Crossover + RSI Filter", shorttitle = "EMA-X + RSI", overlay = true)
+
+// ── Inputs ──────────────────────────────────────────────────────────────────
+fastLen  = input.int(9,   "Fast EMA Length",  minval = 1, group = "Moving Averages")
+slowLen  = input.int(21,  "Slow EMA Length",  minval = 1, group = "Moving Averages")
+showCloud = input.bool(true, "Show Trend Cloud", group = "Moving Averages")
+
+rsiLen      = input.int(14, "RSI Length",            minval = 1,  group = "RSI Filter")
+rsiBullMin  = input.int(50, "Long: RSI must be above",  minval = 0, maxval = 100, group = "RSI Filter")
+rsiBullMax  = input.int(70, "Long: RSI must be below",  minval = 0, maxval = 100, group = "RSI Filter", tooltip = "Blocks longs when RSI is already overbought")
+rsiBearMax  = input.int(50, "Short: RSI must be below", minval = 0, maxval = 100, group = "RSI Filter")
+rsiBearMin  = input.int(30, "Short: RSI must be above", minval = 0, maxval = 100, group = "RSI Filter", tooltip = "Blocks shorts when RSI is already oversold")
+
+// ── Calculations ────────────────────────────────────────────────────────────
+emaFast = ta.ema(close, fastLen)
+emaSlow = ta.ema(close, slowLen)
+rsiVal  = ta.rsi(close, rsiLen)
+
+crossUp   = ta.crossover(emaFast, emaSlow)
+crossDown = ta.crossunder(emaFast, emaSlow)
+
+longSignal  = crossUp   and rsiVal > rsiBullMin and rsiVal < rsiBullMax
+shortSignal = crossDown and rsiVal < rsiBearMax and rsiVal > rsiBearMin
+
+// Crossovers that failed the RSI filter (shown faintly so you see what was skipped)
+longFiltered  = crossUp   and not longSignal
+shortFiltered = crossDown and not shortSignal
+
+// ── Plots ───────────────────────────────────────────────────────────────────
+pFast = plot(emaFast, "Fast EMA", color = color.new(color.teal, 0),   linewidth = 2)
+pSlow = plot(emaSlow, "Slow EMA", color = color.new(color.orange, 0), linewidth = 2)
+fill(pFast, pSlow, color = showCloud ? (emaFast > emaSlow ? color.new(color.teal, 85) : color.new(color.orange, 85)) : na, title = "Trend Cloud")
+
+plotshape(longSignal,  "Long Signal",  shape.triangleup,   location.belowbar, color.new(color.teal, 0),   size = size.small, text = "Long")
+plotshape(shortSignal, "Short Signal", shape.triangledown, location.abovebar, color.new(color.orange, 0), size = size.small, text = "Short")
+plotshape(longFiltered,  "Filtered Long (RSI blocked)",  shape.xcross, location.belowbar, color.new(color.gray, 40), size = size.tiny)
+plotshape(shortFiltered, "Filtered Short (RSI blocked)", shape.xcross, location.abovebar, color.new(color.gray, 40), size = size.tiny)
+
+// ── Alerts ──────────────────────────────────────────────────────────────────
+alertcondition(longSignal,  "Long Entry",  "EMA-X + RSI: LONG signal on {{ticker}} ({{interval}})")
+alertcondition(shortSignal, "Short Entry", "EMA-X + RSI: SHORT signal on {{ticker}} ({{interval}})")
