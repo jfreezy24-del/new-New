@@ -1,0 +1,103 @@
+//@version=6
+// ICT Power of Three (Po3 / AMD) — Recreation
+// The daily narrative model: every day is Accumulation → Manipulation →
+// Distribution around the midnight New York open.
+//   Accumulation:  Asia consolidates near the daily open, building positions
+//   Manipulation:  London runs one side of the Asia range (the "Judas swing")
+//                  to take stops — the fake move
+//   Distribution:  the real move expands the other way through New York
+// Bullish Po3 = London sweeps the Asia LOW, then price reclaims the daily
+// open → expansion up. Bearish is the mirror.
+indicator("ICT Power of Three (Recreation)", shorttitle = "Po3 / AMD", overlay = true, max_boxes_count = 100, max_labels_count = 200)
+
+// ── Inputs ──────────────────────────────────────────────────────────────────
+asiaSess   = input.session("2000-0000", "Accumulation (Asia)",      group = "Sessions (NY time)")
+londonSess = input.session("0200-0500", "Manipulation (London)",    group = "Sessions (NY time)")
+nySess     = input.session("0930-1600", "Distribution (New York)",  group = "Sessions (NY time)")
+shadeSessions = input.bool(true, "Shade Session Phases", group = "Display")
+showAsiaBox   = input.bool(true, "Show Asia Range Box",  group = "Display")
+
+colBull = color.teal
+colBear = color.orange
+tz = "America/New_York"
+
+// ── Midnight NY open (the Po3 anchor) ───────────────────────────────────────
+nyDay    = dayofmonth(time, tz)
+newNYDay = nyDay != nyDay[1]
+
+var float midnightOpen = na
+if newNYDay
+    midnightOpen := open
+
+plot(timeframe.isintraday ? midnightOpen : na, "Midnight NY Open", color = color.new(color.gray, 0), style = plot.style_linebr, linewidth = 2)
+
+// ── Session phases ──────────────────────────────────────────────────────────
+inAsia   = timeframe.isintraday and not na(time(timeframe.period, asiaSess, tz))
+inLondon = timeframe.isintraday and not na(time(timeframe.period, londonSess, tz))
+inNY     = timeframe.isintraday and not na(time(timeframe.period, nySess, tz))
+
+bgcolor(shadeSessions and inAsia   ? color.new(color.gray, 94) : na, title = "Accumulation")
+bgcolor(shadeSessions and inLondon ? color.new(colBear, 94)    : na, title = "Manipulation")
+bgcolor(shadeSessions and inNY     ? color.new(colBull, 94)    : na, title = "Distribution")
+
+// ── Asia accumulation range ─────────────────────────────────────────────────
+var float asiaHi  = na
+var float asiaLo  = na
+var box   asiaBox = na
+
+if inAsia and not inAsia[1]
+    asiaHi := high
+    asiaLo := low
+    if showAsiaBox
+        asiaBox := box.new(bar_index, high, bar_index, low, border_color = color.new(color.gray, 50), bgcolor = color.new(color.gray, 92))
+else if inAsia
+    asiaHi := math.max(asiaHi, high)
+    asiaLo := math.min(asiaLo, low)
+    if showAsiaBox and not na(asiaBox)
+        box.set_top(asiaBox, asiaHi)
+        box.set_bottom(asiaBox, asiaLo)
+        box.set_right(asiaBox, bar_index)
+
+// ── Manipulation: the Judas swing through the Asia range ────────────────────
+var bool sweptAsiaLo = false
+var bool sweptAsiaHi = false
+var bool firedLong   = false
+var bool firedShort  = false
+
+if newNYDay
+    sweptAsiaLo := false
+    sweptAsiaHi := false
+    firedLong   := false
+    firedShort  := false
+
+judasDown = inLondon and not na(asiaLo) and low < asiaLo and not sweptAsiaLo
+judasUp   = inLondon and not na(asiaHi) and high > asiaHi and not sweptAsiaHi
+
+if judasDown
+    sweptAsiaLo := true
+    label.new(bar_index, low, "Judas ▼\nAsia low swept", style = label.style_label_up, color = color.new(colBear, 80), textcolor = color.white, size = size.tiny)
+if judasUp
+    sweptAsiaHi := true
+    label.new(bar_index, high, "Judas ▲\nAsia high swept", style = label.style_label_down, color = color.new(colBear, 80), textcolor = color.white, size = size.tiny)
+
+// ── Distribution: reclaim of the midnight open after the Judas swing ────────
+crossUpOpen   = ta.crossover(close, midnightOpen)
+crossDownOpen = ta.crossunder(close, midnightOpen)
+inTradeHours  = inLondon or inNY
+
+bullPo3 = sweptAsiaLo and not firedLong  and inTradeHours and crossUpOpen
+bearPo3 = sweptAsiaHi and not firedShort and inTradeHours and crossDownOpen
+
+if bullPo3
+    firedLong := true
+if bearPo3
+    firedShort := true
+
+// ── Markers & alerts ────────────────────────────────────────────────────────
+plotshape(bullPo3, "Bullish Po3", shape.triangleup,   location.belowbar, color.new(colBull, 0), size = size.small, text = "Po3", textcolor = color.white)
+plotshape(bearPo3, "Bearish Po3", shape.triangledown, location.abovebar, color.new(colBear, 0), size = size.small, text = "Po3", textcolor = color.white)
+
+alertcondition(judasDown, "Judas Swing Down", "Po3: {{ticker}} swept the Asia low in London — watch for reclaim of midnight open")
+alertcondition(judasUp,   "Judas Swing Up",   "Po3: {{ticker}} swept the Asia high in London — watch for loss of midnight open")
+alertcondition(bullPo3, "Bullish Po3", "Po3: {{ticker}} reclaimed the midnight open after the Judas swing — distribution UP likely")
+alertcondition(bearPo3, "Bearish Po3", "Po3: {{ticker}} lost the midnight open after the Judas swing — distribution DOWN likely")

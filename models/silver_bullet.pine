@@ -1,0 +1,87 @@
+//@version=6
+// ICT Silver Bullet — Recreation
+// The famous time-based model: during three specific one-hour windows, trade
+// the first Fair Value Gap that forms in the direction of bias.
+//   London Open SB: 03:00-04:00 NY   |   AM Session SB: 10:00-11:00 NY
+//   PM Session SB:  14:00-15:00 NY
+// The algorithm is pure: window opens → FVG forms → entry on the retrace into
+// it → target nearby liquidity. Bias filter is configurable (daily open / EMA).
+indicator("ICT Silver Bullet (Recreation)", shorttitle = "Silver Bullet", overlay = true, max_boxes_count = 200, max_labels_count = 200)
+
+// ── Inputs ──────────────────────────────────────────────────────────────────
+useLDN = input.bool(true, "London Open (03:00-04:00 NY)", group = "Windows")
+useAM  = input.bool(true, "AM Session (10:00-11:00 NY)",  group = "Windows")
+usePM  = input.bool(true, "PM Session (14:00-15:00 NY)",  group = "Windows")
+shadeWindows = input.bool(true, "Shade Windows", group = "Windows")
+
+biasMode = input.string("Daily Open", "Bias Filter", options = ["Daily Open", "EMA 50", "None"], group = "Bias", tooltip = "Daily Open: longs above / shorts below today's open. EMA 50: same vs the EMA. None: take FVGs both ways")
+
+extendBoxes = input.int(30, "Extend FVG Boxes (bars)", minval = 5, maxval = 200, group = "Display")
+
+colBull = color.teal
+colBear = color.orange
+tz = "America/New_York"
+
+// ── Windows ─────────────────────────────────────────────────────────────────
+inLDN = useLDN and not na(time(timeframe.period, "0300-0400", tz))
+inAM  = useAM  and not na(time(timeframe.period, "1000-1100", tz))
+inPM  = usePM  and not na(time(timeframe.period, "1400-1500", tz))
+inSB  = timeframe.isintraday and (inLDN or inAM or inPM)
+
+bgcolor(shadeWindows and inSB ? color.new(color.gray, 92) : na, title = "Silver Bullet Window")
+
+// ── Bias ────────────────────────────────────────────────────────────────────
+dayOpen = request.security(syminfo.tickerid, "D", open, lookahead = barmerge.lookahead_on)
+ema50   = ta.ema(close, 50)
+bullBias = biasMode == "None" or (biasMode == "Daily Open" ? close > dayOpen : close > ema50)
+bearBias = biasMode == "None" or (biasMode == "Daily Open" ? close < dayOpen : close < ema50)
+
+plot(biasMode == "Daily Open" ? dayOpen : na, "Daily Open", color = color.new(color.gray, 40), style = plot.style_linebr)
+plot(biasMode == "EMA 50" ? ema50 : na, "EMA 50", color = color.new(color.gray, 40))
+
+// ── FVG detection inside the window ─────────────────────────────────────────
+var array<box>  fvgBoxes = array.new<box>()
+var array<int>  fvgDirs  = array.new<int>()  // 1 bull, -1 bear
+var array<bool> fvgUsed  = array.new<bool>()
+
+newBullFVG = inSB and low > high[2] and bullBias
+newBearFVG = inSB and high < low[2] and bearBias
+
+if newBullFVG
+    array.push(fvgBoxes, box.new(bar_index - 2, low, bar_index + extendBoxes, high[2], border_color = color.new(colBull, 50), bgcolor = color.new(colBull, 85)))
+    array.push(fvgDirs, 1)
+    array.push(fvgUsed, false)
+if newBearFVG
+    array.push(fvgBoxes, box.new(bar_index - 2, low[2], bar_index + extendBoxes, high, border_color = color.new(colBear, 50), bgcolor = color.new(colBear, 85)))
+    array.push(fvgDirs, -1)
+    array.push(fvgUsed, false)
+
+// ── Entry: retrace into an unused FVG while its box is alive ────────────────
+longEntry  = false
+shortEntry = false
+if array.size(fvgBoxes) > 0
+    for i = array.size(fvgBoxes) - 1 to 0
+        b    = array.get(fvgBoxes, i)
+        dir  = array.get(fvgDirs, i)
+        used = array.get(fvgUsed, i)
+        if bar_index > box.get_right(b)
+            box.delete(b)
+            array.remove(fvgBoxes, i)
+            array.remove(fvgDirs, i)
+            array.remove(fvgUsed, i)
+        else if not used and bar_index > box.get_left(b) + 2
+            if dir == 1 and low <= box.get_top(b) and close > box.get_bottom(b)
+                longEntry := true
+                array.set(fvgUsed, i, true)
+            if dir == -1 and high >= box.get_bottom(b) and close < box.get_top(b)
+                shortEntry := true
+                array.set(fvgUsed, i, true)
+
+// ── Markers & alerts ────────────────────────────────────────────────────────
+plotshape(longEntry,  "SB Long",  shape.triangleup,   location.belowbar, color.new(colBull, 0), size = size.small)
+plotshape(shortEntry, "SB Short", shape.triangledown, location.abovebar, color.new(colBear, 0), size = size.small)
+
+alertcondition(newBullFVG, "SB Bullish FVG", "Silver Bullet: bullish FVG formed in the window on {{ticker}} ({{interval}})")
+alertcondition(newBearFVG, "SB Bearish FVG", "Silver Bullet: bearish FVG formed in the window on {{ticker}} ({{interval}})")
+alertcondition(longEntry,  "SB Long Entry",  "Silver Bullet: LONG — price retraced into the window FVG on {{ticker}} ({{interval}})")
+alertcondition(shortEntry, "SB Short Entry", "Silver Bullet: SHORT — price retraced into the window FVG on {{ticker}} ({{interval}})")

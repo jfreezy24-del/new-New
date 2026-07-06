@@ -1,0 +1,124 @@
+//@version=6
+// Forever Model — Recreation
+// Educational recreation of the popular "Forever Model" framework (the
+// well-known indicator implementation is by @toodegrees). The model's mantra:
+// NO SWEEP, NO TRADE. Sequence:
+//   1. HTF liquidity sweep — price wicks through the previous HTF candle's
+//      high/low and rejects (closes back across it on the chart timeframe)
+//   2. Optional SMT divergence — a correlated symbol FAILS to sweep its own
+//      corresponding level at the same time (cracks in correlation)
+//   3. LTF CISD — price closes through the open of the candle series that
+//      delivered into the sweep, confirming the reversal
+//   4. Entry at the CISD / the FVG left by the confirmation leg,
+//      targeting the opposing HTF liquidity
+indicator("Forever Model (Recreation)", shorttitle = "Forever", overlay = true, max_lines_count = 500, max_labels_count = 500, max_boxes_count = 100)
+
+// ── Inputs ──────────────────────────────────────────────────────────────────
+htf = input.timeframe("240", "HTF (liquidity levels)", tooltip = "Previous candle of this timeframe provides the buy-side/sell-side liquidity")
+
+useSMT  = input.bool(false, "Require SMT Divergence", group = "SMT")
+smtSym  = input.symbol("CME_MINI:NQ1!", "Correlated Symbol", group = "SMT", tooltip = "e.g. compare ES with NQ, EURUSD with GBPUSD")
+
+showFVG    = input.bool(true, "Draw Entry FVG from Confirmation Leg", group = "Display")
+showTarget = input.bool(true, "Show Opposing Liquidity Target", group = "Display")
+
+colBull = color.teal
+colBear = color.orange
+
+// ── HTF liquidity: previous completed HTF candle's extremes ─────────────────
+[prevHtfHigh, prevHtfLow] = request.security(syminfo.tickerid, htf, [high[1], low[1]], lookahead = barmerge.lookahead_on)
+newHTF = timeframe.change(htf)
+
+// Correlated symbol data (always requested; only used when SMT is on)
+[smtHigh, smtLow] = request.security(smtSym, timeframe.period, [high, low], lookahead = barmerge.lookahead_off)
+[smtPrevHtfHigh, smtPrevHtfLow] = request.security(smtSym, htf, [high[1], low[1]], lookahead = barmerge.lookahead_on)
+
+// ── Step 1+2: sweep with rejection (and SMT check at the sweep bar) ─────────
+sweepLow  = low < prevHtfLow   and close > prevHtfLow   // sell-side taken, rejected
+sweepHigh = high > prevHtfHigh and close < prevHtfHigh  // buy-side taken, rejected
+
+smtBullOk = not useSMT or smtLow > smtPrevHtfLow    // correlated symbol did NOT sweep its low
+smtBearOk = not useSMT or smtHigh < smtPrevHtfHigh  // correlated symbol did NOT sweep its high
+
+// ── CISD machinery (same engine as the TTFM recreation) ─────────────────────
+var float curDownOpen = na
+var float curUpOpen   = na
+curDownOpen := close < open ? (close[1] < open[1] and not na(curDownOpen) ? curDownOpen : open) : na
+curUpOpen   := close > open ? (close[1] > open[1] and not na(curUpOpen)   ? curUpOpen   : open) : na
+
+// ── Setup state ─────────────────────────────────────────────────────────────
+var int   bias      = 0
+var float extreme   = na
+var float cisdLevel = na
+var float target    = na
+
+if sweepLow and smtBullOk and bias != 1
+    bias      := 1
+    extreme   := low
+    cisdLevel := nz(curDownOpen, open)
+    target    := prevHtfHigh
+    label.new(bar_index, low, "Sweep SSL" + (useSMT ? " +SMT" : ""), style = label.style_label_up, color = color.new(colBull, 80), textcolor = color.white, size = size.tiny)
+if sweepHigh and smtBearOk and bias != -1
+    bias      := -1
+    extreme   := high
+    cisdLevel := nz(curUpOpen, open)
+    target    := prevHtfLow
+    label.new(bar_index, high, "Sweep BSL" + (useSMT ? " +SMT" : ""), style = label.style_label_down, color = color.new(colBear, 80), textcolor = color.white, size = size.tiny)
+
+// Deeper extreme before confirmation → re-anchor the CISD level
+if bias == 1 and low < extreme
+    extreme   := low
+    cisdLevel := nz(curDownOpen, open)
+if bias == -1 and high > extreme
+    extreme   := high
+    cisdLevel := nz(curUpOpen, open)
+
+// ── Step 3: CISD confirmation = entry ───────────────────────────────────────
+longEntry  = bias == 1  and close > cisdLevel
+shortEntry = bias == -1 and close < cisdLevel
+
+// Step 4: mark the FVG left by the confirmation leg as the entry zone
+f_drawFVG(bool bullish) =>
+    if showFVG
+        found = false
+        for i = 0 to 4
+            if not found
+                if bullish and low[i] > high[i + 2]
+                    box.new(bar_index - i, low[i], bar_index + 20, high[i + 2], border_color = color.new(colBull, 50), bgcolor = color.new(colBull, 85))
+                    found := true
+                if not bullish and high[i] < low[i + 2]
+                    box.new(bar_index - i, low[i + 2], bar_index + 20, high[i], border_color = color.new(colBear, 50), bgcolor = color.new(colBear, 85))
+                    found := true
+
+if longEntry
+    line.new(bar_index - 5, cisdLevel, bar_index, cisdLevel, color = color.new(colBull, 0), width = 2)
+    label.new(bar_index, cisdLevel, "CISD ▲", style = label.style_label_up, color = color.new(colBull, 80), textcolor = color.white, size = size.small)
+    if showTarget
+        line.new(bar_index, target, bar_index + 30, target, color = color.new(colBull, 40), style = line.style_dashed)
+        label.new(bar_index + 30, target, "opposing BSL", style = label.style_label_left, color = color.new(color.gray, 85), textcolor = color.white, size = size.tiny)
+    f_drawFVG(true)
+    bias := 0
+if shortEntry
+    line.new(bar_index - 5, cisdLevel, bar_index, cisdLevel, color = color.new(colBear, 0), width = 2)
+    label.new(bar_index, cisdLevel, "CISD ▼", style = label.style_label_down, color = color.new(colBear, 80), textcolor = color.white, size = size.small)
+    if showTarget
+        line.new(bar_index, target, bar_index + 30, target, color = color.new(colBear, 40), style = line.style_dashed)
+        label.new(bar_index + 30, target, "opposing SSL", style = label.style_label_left, color = color.new(color.gray, 85), textcolor = color.white, size = size.tiny)
+    f_drawFVG(false)
+    bias := 0
+
+// Setup expires when a new HTF candle opens without confirmation
+if newHTF and bias != 0
+    bias := 0
+
+// ── Levels, markers & alerts ────────────────────────────────────────────────
+plot(prevHtfHigh, "Prev HTF High (BSL)", color = color.new(color.gray, 55), style = plot.style_linebr)
+plot(prevHtfLow,  "Prev HTF Low (SSL)",  color = color.new(color.gray, 55), style = plot.style_linebr)
+
+plotshape(longEntry,  "Forever Long",  shape.triangleup,   location.belowbar, color.new(colBull, 0), size = size.small)
+plotshape(shortEntry, "Forever Short", shape.triangledown, location.abovebar, color.new(colBear, 0), size = size.small)
+
+alertcondition(sweepLow,   "Sell-Side Sweep", "Forever Model: {{ticker}} swept HTF sell-side liquidity — watch for CISD")
+alertcondition(sweepHigh,  "Buy-Side Sweep",  "Forever Model: {{ticker}} swept HTF buy-side liquidity — watch for CISD")
+alertcondition(longEntry,  "Forever Long",    "Forever Model: LONG confirmed (sweep + CISD) on {{ticker}} ({{interval}})")
+alertcondition(shortEntry, "Forever Short",   "Forever Model: SHORT confirmed (sweep + CISD) on {{ticker}} ({{interval}})")

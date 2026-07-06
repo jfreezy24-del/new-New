@@ -1,0 +1,118 @@
+//@version=6
+// ICT 2022 Model — Recreation
+// The most famous ICT entry model, taught in the 2022 public mentorship:
+//   1. Liquidity sweep — price runs an old swing high/low (stop raid) and rejects
+//   2. Market Structure Shift (MSS) with DISPLACEMENT — an energetic close
+//      through the opposite swing, confirming the reversal
+//   3. Entry on the retrace into the Fair Value Gap left by the displacement leg
+// Optional killzone filter restricts signals to the NY AM window.
+indicator("ICT 2022 Model (Recreation)", shorttitle = "ICT 2022", overlay = true, max_lines_count = 500, max_labels_count = 500, max_boxes_count = 100)
+
+// ── Inputs ──────────────────────────────────────────────────────────────────
+swingLen = input.int(3, "Swing Length (pivot bars each side)", minval = 1, maxval = 10, group = "Structure")
+dispMult = input.float(1.2, "Displacement Body (× ATR)", minval = 0.1, step = 0.1, group = "Structure", tooltip = "MSS candle body must exceed this multiple of ATR(14) to count as displacement")
+
+useKillzone = input.bool(false, "Only Signal Inside Killzone", group = "Killzone")
+kzSession   = input.session("0830-1100", "Killzone (NY time)", group = "Killzone")
+
+entryTimeout = input.int(50, "Entry Zone Timeout (bars)", minval = 5, maxval = 200, group = "Entry")
+
+colBull = color.teal
+colBear = color.orange
+
+// ── Swing tracking ──────────────────────────────────────────────────────────
+ph = ta.pivothigh(high, swingLen, swingLen)
+pl = ta.pivotlow(low, swingLen, swingLen)
+
+var float lastSH = na
+var bool  shTaken = true
+var float lastSL = na
+var bool  slTaken = true
+
+if not na(ph)
+    lastSH  := ph
+    shTaken := false
+if not na(pl)
+    lastSL  := pl
+    slTaken := false
+
+atrVal = ta.atr(14)
+inKZ   = not useKillzone or not na(time(timeframe.period, kzSession, "America/New_York"))
+
+// ── Step 1: liquidity sweep (raid the stop pool, close back inside) ─────────
+sweepBSL = not shTaken and not na(lastSH) and high > lastSH and close < lastSH // buy-side raided → bearish setup
+sweepSSL = not slTaken and not na(lastSL) and low  < lastSL and close > lastSL // sell-side raided → bullish setup
+
+var int   setup        = 0  // 1 = bullish (swept SSL), -1 = bearish (swept BSL)
+var float sweepExtreme = na // stop goes beyond this wick
+
+if sweepBSL and inKZ
+    setup        := -1
+    shTaken      := true
+    sweepExtreme := high
+    label.new(bar_index, high, "Sweep BSL", style = label.style_label_down, color = color.new(colBear, 80), textcolor = color.white, size = size.tiny)
+if sweepSSL and inKZ
+    setup        := 1
+    slTaken      := true
+    sweepExtreme := low
+    label.new(bar_index, low, "Sweep SSL", style = label.style_label_up, color = color.new(colBull, 80), textcolor = color.white, size = size.tiny)
+
+// ── Step 2: MSS with displacement ───────────────────────────────────────────
+bodySize = math.abs(close - open)
+displacing = bodySize > dispMult * atrVal
+
+bullMSS = setup == 1  and not na(lastSH) and close > lastSH and close > open and displacing
+bearMSS = setup == -1 and not na(lastSL) and close < lastSL and close < open and displacing
+
+// ── Step 3: entry = retrace into the displacement FVG ───────────────────────
+var box   entryZone = na
+var int   entryDir  = 0
+var int   zoneBirth = na
+var float stopLevel = na
+
+f_findFVG(bool bullish) =>
+    box result = na
+    for i = 0 to 4
+        if na(result)
+            if bullish and low[i] > high[i + 2]
+                result := box.new(bar_index - i, low[i], bar_index + 5, high[i + 2], border_color = color.new(colBull, 50), bgcolor = color.new(colBull, 85))
+            if not bullish and high[i] < low[i + 2]
+                result := box.new(bar_index - i, low[i + 2], bar_index + 5, high[i], border_color = color.new(colBear, 50), bgcolor = color.new(colBear, 85))
+    result
+
+if bullMSS or bearMSS
+    box.delete(entryZone)
+    entryZone := f_findFVG(bullMSS)
+    entryDir  := na(entryZone) ? 0 : bullMSS ? 1 : -1
+    zoneBirth := bar_index
+    stopLevel := sweepExtreme
+    setup     := 0
+    label.new(bar_index, close, bullMSS ? "MSS ▲" : "MSS ▼", style = bullMSS ? label.style_label_up : label.style_label_down, color = color.new(bullMSS ? colBull : colBear, 70), textcolor = color.white, size = size.small)
+
+// Manage the armed entry zone
+longEntry  = false
+shortEntry = false
+if entryDir != 0 and not na(entryZone)
+    box.set_right(entryZone, bar_index)
+    zoneTop = box.get_top(entryZone)
+    zoneBot = box.get_bottom(entryZone)
+    if entryDir == 1 and low <= zoneTop and bar_index > zoneBirth
+        longEntry := true
+        line.new(bar_index, stopLevel, bar_index + 15, stopLevel, color = color.new(colBear, 40), style = line.style_dotted)
+        entryDir := 0
+    else if entryDir == -1 and high >= zoneBot and bar_index > zoneBirth
+        shortEntry := true
+        line.new(bar_index, stopLevel, bar_index + 15, stopLevel, color = color.new(colBull, 40), style = line.style_dotted)
+        entryDir := 0
+    else if bar_index - zoneBirth > entryTimeout or (entryDir == 1 and close < zoneBot) or (entryDir == -1 and close > zoneTop)
+        box.delete(entryZone) // expired or traded through — dead setup
+        entryDir := 0
+
+// ── Markers & alerts ────────────────────────────────────────────────────────
+plotshape(longEntry,  "2022 Long Entry",  shape.triangleup,   location.belowbar, color.new(colBull, 0), size = size.small)
+plotshape(shortEntry, "2022 Short Entry", shape.triangledown, location.abovebar, color.new(colBear, 0), size = size.small)
+
+alertcondition(bullMSS, "Bullish MSS", "ICT 2022: sweep + bullish displacement MSS on {{ticker}} ({{interval}}) — FVG armed")
+alertcondition(bearMSS, "Bearish MSS", "ICT 2022: sweep + bearish displacement MSS on {{ticker}} ({{interval}}) — FVG armed")
+alertcondition(longEntry,  "2022 Long Entry",  "ICT 2022: price returned to the FVG — LONG entry on {{ticker}} ({{interval}})")
+alertcondition(shortEntry, "2022 Short Entry", "ICT 2022: price returned to the FVG — SHORT entry on {{ticker}} ({{interval}})")

@@ -1,0 +1,77 @@
+//@version=6
+// Candle Range Theory (CRT)
+// The viral higher-timeframe candle model: every HTF candle is its own
+// accumulation → manipulation → distribution cycle. The setup is one mechanic:
+// a candle PURGES the previous candle's high or low (manipulation, stops get
+// swept) but CLOSES BACK INSIDE that candle's range — the real intention is
+// then delivery to the OPPOSITE side of the range.
+//
+//   Bullish CRT: candle sweeps previous low, closes back inside → target range high
+//   Bearish CRT: candle sweeps previous high, closes back inside → target range low
+indicator("Candle Range Theory (CRT)", shorttitle = "CRT", overlay = true, max_lines_count = 500, max_labels_count = 500)
+
+// ── Inputs ──────────────────────────────────────────────────────────────────
+htf       = input.timeframe("240", "CRT Timeframe", tooltip = "Timeframe whose candles define the ranges — commonly 1H, 4H, or Daily. Must be above the chart timeframe")
+showLines = input.bool(true, "Show Active CRT Range Lines")
+showMid   = input.bool(true, "Show Range Midpoint (50%)")
+
+colBull = color.teal
+colBear = color.orange
+
+// ── Completed HTF candles (offset + lookahead_on = confirmed, non-repainting)
+// c1 = the "range" candle, c2 = the candle that purged it (just closed)
+[c1h, c1l] = request.security(syminfo.tickerid, htf, [high[2], low[2]], lookahead = barmerge.lookahead_on)
+[c2h, c2l, c2c] = request.security(syminfo.tickerid, htf, [high[1], low[1], close[1]], lookahead = barmerge.lookahead_on)
+newHTF = timeframe.change(htf)
+
+// ── CRT detection (evaluated once, when the purge candle closes) ────────────
+bullCRT = newHTF and c2l < c1l and c2c > c1l and c2c < c1h
+bearCRT = newHTF and c2h > c1h and c2c < c1h and c2c > c1l and not bullCRT
+
+// ── Active setup state ──────────────────────────────────────────────────────
+var line hiLine  = na
+var line loLine  = na
+var line midLine = na
+var int   dir          = 0  // 1 = bullish CRT active, -1 = bearish, 0 = none
+var float crtHigh      = na
+var float crtLow       = na
+var float purgeExtreme = na // wick of the manipulation — close beyond it invalidates
+
+f_clearLines() =>
+    line.delete(hiLine)
+    line.delete(loLine)
+    line.delete(midLine)
+
+if bullCRT or bearCRT
+    f_clearLines()
+    dir          := bullCRT ? 1 : -1
+    crtHigh      := c1h
+    crtLow       := c1l
+    purgeExtreme := bullCRT ? c2l : c2h
+    if showLines
+        hiLine := line.new(bar_index, crtHigh, bar_index + 1, crtHigh, extend = extend.right, color = color.new(colBull, 20), width = 2)
+        loLine := line.new(bar_index, crtLow,  bar_index + 1, crtLow,  extend = extend.right, color = color.new(colBear, 20), width = 2)
+        if showMid
+            midLine := line.new(bar_index, math.avg(crtHigh, crtLow), bar_index + 1, math.avg(crtHigh, crtLow), extend = extend.right, color = color.new(color.gray, 50), style = line.style_dashed)
+    label.new(bar_index, bullCRT ? c2l : c2h, bullCRT ? "CRT ▲\npurged low" : "CRT ▼\npurged high", style = bullCRT ? label.style_label_up : label.style_label_down, color = color.new(bullCRT ? colBull : colBear, 80), textcolor = color.white, size = size.small)
+
+// ── Resolution: delivery to the opposite side, or invalidation ──────────────
+delivered   = dir == 1 and close >= crtHigh or dir == -1 and close <= crtLow
+invalidated = dir == 1 and close < purgeExtreme or dir == -1 and close > purgeExtreme
+
+if delivered
+    label.new(bar_index, dir == 1 ? crtHigh : crtLow, "✓ delivered", style = label.style_label_left, color = color.new(color.gray, 80), textcolor = color.white, size = size.small)
+    f_clearLines()
+    dir := 0
+else if invalidated
+    label.new(bar_index, purgeExtreme, "✗ invalidated", style = label.style_label_left, color = color.new(color.gray, 80), textcolor = color.white, size = size.small)
+    f_clearLines()
+    dir := 0
+
+// ── Signals & alerts ────────────────────────────────────────────────────────
+plotshape(bullCRT, "Bullish CRT", shape.triangleup,   location.belowbar, color.new(colBull, 0), size = size.small)
+plotshape(bearCRT, "Bearish CRT", shape.triangledown, location.abovebar, color.new(colBear, 0), size = size.small)
+
+alertcondition(bullCRT, "Bullish CRT", "CRT: {{ticker}} purged the prior {{interval}} range low and closed back inside — targeting range high")
+alertcondition(bearCRT, "Bearish CRT", "CRT: {{ticker}} purged the prior range high and closed back inside — targeting range low")
+alertcondition(delivered, "CRT Delivered", "CRT: {{ticker}} delivered to the opposite side of the range")
