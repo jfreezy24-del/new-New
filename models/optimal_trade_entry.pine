@@ -1,0 +1,102 @@
+//@version=6
+// ICT Optimal Trade Entry (OTE) — Recreation
+// The classic ICT retracement entry: after a displacement leg (ideally one
+// that originates from a liquidity sweep), the entry zone is the 62%-79%
+// Fibonacci retracement of that leg, with the "sweet spot" at 70.5%.
+//   Bullish: swing low A (sweeps a prior low) → swing high B → buy the
+//   0.62-0.79 pullback of A→B. Stop below A. Targets at B and the -0.5 extension.
+indicator("ICT Optimal Trade Entry (Recreation)", shorttitle = "OTE", overlay = true, max_boxes_count = 100, max_lines_count = 200, max_labels_count = 200)
+
+// ── Inputs ──────────────────────────────────────────────────────────────────
+swingLen     = input.int(5, "Swing Length (pivot bars each side)", minval = 2, maxval = 20)
+minLegATR    = input.float(2.0, "Min Leg Size (× ATR)", minval = 0.5, step = 0.5, tooltip = "The impulse leg must span at least this many ATRs to be worth retracing into")
+requireSweep = input.bool(true, "Require Liquidity Sweep at Origin", tooltip = "The leg's origin swing must have taken out the prior swing (raid before reversal)")
+zoneTimeout  = input.int(80, "Zone Timeout (bars)", minval = 10, maxval = 300)
+showTargets  = input.bool(true, "Show Targets (B and -0.5 extension)")
+
+colBull = color.teal
+colBear = color.orange
+
+atrVal = ta.atr(14)
+
+// ── Swing tracking (keep previous pivots to detect sweeps at the origin) ────
+ph = ta.pivothigh(high, swingLen, swingLen)
+pl = ta.pivotlow(low, swingLen, swingLen)
+
+var float pLo     = na
+var int   pLoBar  = na
+var bool  pLoSwept = false // this pivot low took out the one before it
+var float pHi     = na
+var int   pHiBar  = na
+var bool  pHiSwept = false
+
+if not na(pl)
+    pLoSwept := not na(pLo) and pl < pLo
+    pLo      := pl
+    pLoBar   := bar_index - swingLen
+if not na(ph)
+    pHiSwept := not na(pHi) and ph > pHi
+    pHi      := ph
+    pHiBar   := bar_index - swingLen
+
+// ── Arm an OTE zone when the leg's far swing confirms ───────────────────────
+var box   oteZone   = na
+var line  sweetLine = na
+var int   entryDir  = 0
+var int   zoneBirth = na
+var float origin    = na  // A — invalidation beyond it
+var float legEnd    = na  // B
+
+// Bullish: pivot high B confirms after pivot low A, leg large enough
+armBull = not na(ph) and not na(pLo) and pLoBar < bar_index - swingLen and (not requireSweep or pLoSwept) and (ph - pLo) > minLegATR * atrVal
+// Bearish mirror
+armBear = not na(pl) and not na(pHi) and pHiBar < bar_index - swingLen and (not requireSweep or pHiSwept) and (pHi - pl) > minLegATR * atrVal
+
+if armBull or armBear
+    isBull = armBull
+    A = isBull ? pLo : pHi
+    B = isBull ? ph : pl
+    range_ = B - A
+    zTop = isBull ? B - 0.62 * range_ : B - 0.79 * range_
+    zBot = isBull ? B - 0.79 * range_ : B - 0.62 * range_
+    sweet = B - 0.705 * range_
+    box.delete(oteZone)
+    line.delete(sweetLine)
+    oteZone   := box.new(bar_index, math.max(zTop, zBot), bar_index + 5, math.min(zTop, zBot), border_color = color.new(isBull ? colBull : colBear, 40), bgcolor = color.new(isBull ? colBull : colBear, 85))
+    sweetLine := line.new(bar_index, sweet, bar_index + 5, sweet, color = color.new(isBull ? colBull : colBear, 20), style = line.style_dashed)
+    entryDir  := isBull ? 1 : -1
+    zoneBirth := bar_index
+    origin    := A
+    legEnd    := B
+    label.new(bar_index, sweet, "OTE 70.5%", style = label.style_label_left, color = color.new(color.gray, 85), textcolor = color.white, size = size.tiny)
+    if showTargets
+        ext = B + (isBull ? 0.5 : -0.5) * range_
+        line.new(bar_index, B,   bar_index + 30, B,   color = color.new(color.gray, 50), style = line.style_dotted)
+        line.new(bar_index, ext, bar_index + 30, ext, color = color.new(color.gray, 50), style = line.style_dotted)
+
+// ── Entry management ────────────────────────────────────────────────────────
+longEntry  = false
+shortEntry = false
+if entryDir != 0 and not na(oteZone)
+    box.set_right(oteZone, bar_index)
+    line.set_x2(sweetLine, bar_index)
+    zTop = box.get_top(oteZone)
+    zBot = box.get_bottom(oteZone)
+    if entryDir == 1 and low <= zTop and close > origin and bar_index > zoneBirth
+        longEntry := true
+        entryDir := 0
+    else if entryDir == -1 and high >= zBot and close < origin and bar_index > zoneBirth
+        shortEntry := true
+        entryDir := 0
+    else if bar_index - zoneBirth > zoneTimeout or (entryDir == 1 and close < origin) or (entryDir == -1 and close > origin) or (entryDir == 1 and close > legEnd) or (entryDir == -1 and close < legEnd)
+        // expired, invalidated beyond the origin, or ran off without retracing
+        box.delete(oteZone)
+        line.delete(sweetLine)
+        entryDir := 0
+
+// ── Markers & alerts ────────────────────────────────────────────────────────
+plotshape(longEntry,  "OTE Long",  shape.triangleup,   location.belowbar, color.new(colBull, 0), size = size.small)
+plotshape(shortEntry, "OTE Short", shape.triangledown, location.abovebar, color.new(colBear, 0), size = size.small)
+
+alertcondition(longEntry,  "OTE Long",  "OTE: {{ticker}} ({{interval}}) pulled back into the 62-79% zone — LONG entry, stop below origin")
+alertcondition(shortEntry, "OTE Short", "OTE: {{ticker}} ({{interval}}) pulled back into the 62-79% zone — SHORT entry, stop above origin")

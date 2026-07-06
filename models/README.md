@@ -15,6 +15,10 @@ most popular ones, with credit to their originators.
 | `ict_2022_model.pine` | **ICT 2022 Model** (credit ICT) | The most famous ICT entry: liquidity sweep of an old swing → Market Structure Shift with displacement (body > ATR multiple) → entry on the retrace into the displacement FVG. Optional NY killzone filter. |
 | `silver_bullet.pine` | **ICT Silver Bullet** (credit ICT) | Pure time-based: during 03:00-04:00, 10:00-11:00, or 14:00-15:00 NY, trade the first FVG in the bias direction (daily open or EMA filter). Boxes drawn per window, entries on the retrace. |
 | `power_of_three.pine` | **ICT Power of Three (AMD)** (credit ICT) | The daily narrative: Asia accumulates around the midnight NY open, London manipulates one side of the Asia range (Judas swing), New York distributes the other way. Signals on the reclaim/loss of midnight open after the Judas swing. |
+| `unicorn_model.pine` | **ICT Unicorn Model** (credit ICT) | Breaker block ∩ fair value gap: after a sweep and displacement MSS, the entry zone is where the breaker candle's range overlaps the displacement FVG. No overlap, no unicorn — the confluence is the model. |
+| `optimal_trade_entry.pine` | **ICT Optimal Trade Entry (OTE)** (credit ICT) | The classic fib entry: after an impulse leg (origin ideally a liquidity sweep), buy/sell the 62-79% retracement with the sweet spot at 70.5%. Stop beyond the origin, targets at the leg end and the -0.5 extension. |
+| `turtle_soup.pine` | **Turtle Soup** (credit Linda Raschke / ICT) | The original fade-the-breakout: price wicks through the previous day's high/low (or a 20-bar Donchian extreme) and closes back inside → fade it, targeting the opposite side of the range. |
+| `osok_weekly.pine` | **ICT One Shot One Kill (OSOK)** (credit ICT) | The weekly-range model: early-week manipulation sweeps the previous week's high/low, then the reclaim/loss of the weekly open signals the weekly expansion the other way. One signal per week, by design. |
 
 ## How to use
 

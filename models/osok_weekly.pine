@@ -1,0 +1,69 @@
+//@version=6
+// ICT One Shot One Kill (OSOK) — Recreation
+// The weekly-range model: one precision trade per week. The weekly open is the
+// dividing line; early in the week (ideally Monday-Wednesday) price manipulates
+// into the PREVIOUS week's high or low, sweeps it, then the weekly expansion
+// runs the other way. Bullish OSOK: sweep last week's low → reclaim the weekly
+// open → expansion toward last week's high. One shot — one signal per week.
+indicator("ICT One Shot One Kill (Recreation)", shorttitle = "OSOK", overlay = true, max_labels_count = 100, max_lines_count = 100)
+
+// ── Inputs ──────────────────────────────────────────────────────────────────
+limitDays  = input.bool(true, "Only Arm Monday-Wednesday", tooltip = "The classic model expects the weekly manipulation early in the week")
+showLevels = input.bool(true, "Show Weekly Open + Previous Week High/Low")
+
+colBull = color.teal
+colBear = color.orange
+tz = "America/New_York"
+
+// ── Weekly levels ───────────────────────────────────────────────────────────
+[pwh, pwl] = request.security(syminfo.tickerid, "W", [high[1], low[1]], lookahead = barmerge.lookahead_on)
+newWeek = timeframe.change("W")
+
+var float weekOpen = na
+var bool  sweptPWL = false
+var bool  sweptPWH = false
+var bool  fired    = false
+
+if newWeek
+    weekOpen := open
+    sweptPWL := false
+    sweptPWH := false
+    fired    := false
+
+plot(showLevels ? weekOpen : na, "Weekly Open",    color = color.new(color.gray, 0),  style = plot.style_linebr, linewidth = 2)
+plot(showLevels ? pwh : na,      "Prev Week High", color = color.new(colBull, 45), style = plot.style_linebr)
+plot(showLevels ? pwl : na,      "Prev Week Low",  color = color.new(colBear, 45), style = plot.style_linebr)
+
+// ── Manipulation: sweep of last week's extreme (early week if limited) ──────
+dow = dayofweek(time, tz)
+dayOk = not limitDays or dow == dayofweek.monday or dow == dayofweek.tuesday or dow == dayofweek.wednesday
+
+if dayOk and not sweptPWL and low < pwl
+    sweptPWL := true
+    label.new(bar_index, low, "PWL swept", style = label.style_label_up, color = color.new(colBull, 80), textcolor = color.white, size = size.tiny)
+if dayOk and not sweptPWH and high > pwh
+    sweptPWH := true
+    label.new(bar_index, high, "PWH swept", style = label.style_label_down, color = color.new(colBear, 80), textcolor = color.white, size = size.tiny)
+
+// ── Distribution: reclaim/loss of the weekly open = the one shot ────────────
+crossUpOpen   = ta.crossover(close, weekOpen)
+crossDownOpen = ta.crossunder(close, weekOpen)
+
+longOSOK  = not fired and sweptPWL and crossUpOpen
+shortOSOK = not fired and sweptPWH and crossDownOpen
+
+if longOSOK
+    fired := true
+    line.new(bar_index, pwh, bar_index + 50, pwh, color = color.new(colBull, 40), style = line.style_dashed)
+    label.new(bar_index + 50, pwh, "target: PWH", style = label.style_label_left, color = color.new(color.gray, 85), textcolor = color.white, size = size.tiny)
+if shortOSOK
+    fired := true
+    line.new(bar_index, pwl, bar_index + 50, pwl, color = color.new(colBear, 40), style = line.style_dashed)
+    label.new(bar_index + 50, pwl, "target: PWL", style = label.style_label_left, color = color.new(color.gray, 85), textcolor = color.white, size = size.tiny)
+
+// ── Markers & alerts ────────────────────────────────────────────────────────
+plotshape(longOSOK,  "OSOK Long",  shape.triangleup,   location.belowbar, color.new(colBull, 0), size = size.small, text = "OSOK", textcolor = color.white)
+plotshape(shortOSOK, "OSOK Short", shape.triangledown, location.abovebar, color.new(colBear, 0), size = size.small, text = "OSOK", textcolor = color.white)
+
+alertcondition(longOSOK,  "OSOK Long",  "OSOK: {{ticker}} swept last week's low and reclaimed the weekly open — weekly expansion UP toward PWH")
+alertcondition(shortOSOK, "OSOK Short", "OSOK: {{ticker}} swept last week's high and lost the weekly open — weekly expansion DOWN toward PWL")

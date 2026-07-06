@@ -1,0 +1,55 @@
+//@version=6
+// ICT Turtle Soup — Recreation
+// The original fade-the-breakout model (Linda Raschke's name, adopted and
+// popularized by ICT as the liquidity-raid reversal). Price runs a well-watched
+// level — the previous day's high/low or a 20-bar Donchian extreme — triggers
+// the breakout stops, and closes back inside: you fade the failed breakout,
+// targeting the opposite side of the range.
+indicator("ICT Turtle Soup (Recreation)", shorttitle = "Turtle Soup", overlay = true, max_labels_count = 200, max_lines_count = 100)
+
+// ── Inputs ──────────────────────────────────────────────────────────────────
+levelMode = input.string("Previous Day High/Low", "Liquidity Levels", options = ["Previous Day High/Low", "Donchian Channel"])
+donLen    = input.int(20, "Donchian Length", minval = 5, maxval = 100, tooltip = "Used when Liquidity Levels = Donchian Channel")
+cooldown  = input.int(10, "Signal Cooldown (bars)", minval = 1, maxval = 100, tooltip = "Minimum bars between signals on the same side")
+
+colBull = color.teal
+colBear = color.orange
+
+// ── Liquidity levels ────────────────────────────────────────────────────────
+[pdh, pdl] = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead = barmerge.lookahead_on)
+donHi = ta.highest(high, donLen)[1]
+donLo = ta.lowest(low, donLen)[1]
+
+usePD  = levelMode == "Previous Day High/Low"
+raidHi = usePD ? pdh : donHi
+raidLo = usePD ? pdl : donLo
+
+plot(raidHi, "Buy-Side Liquidity",  color = color.new(color.gray, 45), style = plot.style_linebr)
+plot(raidLo, "Sell-Side Liquidity", color = color.new(color.gray, 45), style = plot.style_linebr)
+
+// ── Failed raid = signal ────────────────────────────────────────────────────
+// Wick through the level, close back inside — the soup is served
+rawShort = high > raidHi and close < raidHi and close < open
+rawLong  = low  < raidLo and close > raidLo and close > open
+
+var int lastLongBar  = -99999
+var int lastShortBar = -99999
+
+longSignal  = rawLong  and bar_index - lastLongBar  > cooldown
+shortSignal = rawShort and bar_index - lastShortBar > cooldown
+
+if longSignal
+    lastLongBar := bar_index
+    label.new(bar_index, low, "🐢 Soup ▲", style = label.style_label_up, color = color.new(colBull, 70), textcolor = color.white, size = size.small)
+    line.new(bar_index, raidHi, bar_index + 30, raidHi, color = color.new(colBull, 50), style = line.style_dotted) // target: opposite pool
+if shortSignal
+    lastShortBar := bar_index
+    label.new(bar_index, high, "🐢 Soup ▼", style = label.style_label_down, color = color.new(colBear, 70), textcolor = color.white, size = size.small)
+    line.new(bar_index, raidLo, bar_index + 30, raidLo, color = color.new(colBear, 50), style = line.style_dotted)
+
+plotshape(longSignal,  "Turtle Soup Long",  shape.triangleup,   location.belowbar, color.new(colBull, 0), size = size.small)
+plotshape(shortSignal, "Turtle Soup Short", shape.triangledown, location.abovebar, color.new(colBear, 0), size = size.small)
+
+// ── Alerts ──────────────────────────────────────────────────────────────────
+alertcondition(longSignal,  "Turtle Soup Long",  "Turtle Soup: {{ticker}} ({{interval}}) raided the lows and closed back inside — LONG, target the opposite pool")
+alertcondition(shortSignal, "Turtle Soup Short", "Turtle Soup: {{ticker}} ({{interval}}) raided the highs and closed back inside — SHORT, target the opposite pool")

@@ -1,0 +1,123 @@
+//@version=6
+// ICT Unicorn Model — Recreation
+// The Unicorn is the overlap of two ICT PD arrays: a BREAKER BLOCK and a
+// FAIR VALUE GAP occupying the same price span. Sequence (bullish):
+//   1. Price sweeps below an old swing low (liquidity raid)
+//   2. Displacement up breaks the last swing high (MSS)
+//   3. The last down-closing candle before the reversal becomes the breaker;
+//      the displacement leg leaves an FVG
+//   4. Where breaker ∩ FVG overlap → the "unicorn" zone. Entry on the retrace.
+// No overlap, no unicorn — the confluence IS the model.
+indicator("ICT Unicorn Model (Recreation)", shorttitle = "Unicorn", overlay = true, max_boxes_count = 100, max_labels_count = 200, max_lines_count = 100)
+
+// ── Inputs ──────────────────────────────────────────────────────────────────
+swingLen    = input.int(3, "Swing Length (pivot bars each side)", minval = 1, maxval = 10)
+dispMult    = input.float(1.2, "Displacement Body (× ATR)", minval = 0.1, step = 0.1)
+zoneTimeout = input.int(60, "Zone Timeout (bars)", minval = 10, maxval = 300)
+
+colBull = color.teal
+colBear = color.orange
+
+// ── Swings & sweep state ────────────────────────────────────────────────────
+ph = ta.pivothigh(high, swingLen, swingLen)
+pl = ta.pivotlow(low, swingLen, swingLen)
+
+var float lastSH  = na
+var bool  shTaken = true
+var float lastSL  = na
+var bool  slTaken = true
+
+if not na(ph)
+    lastSH  := ph
+    shTaken := false
+if not na(pl)
+    lastSL  := pl
+    slTaken := false
+
+var int setup = 0 // 1 = swept a low (hunting bullish unicorn), -1 = swept a high
+
+if not slTaken and not na(lastSL) and low < lastSL
+    setup   := 1
+    slTaken := true
+if not shTaken and not na(lastSH) and high > lastSH
+    setup   := -1
+    shTaken := true
+
+atrVal  = ta.atr(14)
+lowOff  = -ta.lowestbars(low, 20)
+highOff = -ta.highestbars(high, 20)
+
+// ── MSS with displacement ───────────────────────────────────────────────────
+bodySize   = math.abs(close - open)
+displacing = bodySize > dispMult * atrVal
+
+bullMSS = setup == 1  and not na(lastSH) and close > lastSH and close > open and displacing
+bearMSS = setup == -1 and not na(lastSL) and close < lastSL and close < open and displacing
+
+// ── Build the unicorn zone: breaker ∩ FVG ───────────────────────────────────
+var box   uniZone   = na
+var int   entryDir  = 0
+var int   zoneBirth = na
+var float stopLevel = na
+
+if bullMSS or bearMSS
+    isBull = bullMSS
+    // FVG from the displacement leg (most recent 3-candle gap)
+    float fvgTop = na
+    float fvgBot = na
+    for i = 0 to 4
+        if na(fvgTop)
+            if isBull and low[i] > high[i + 2]
+                fvgTop := low[i]
+                fvgBot := high[i + 2]
+            if not isBull and high[i] < low[i + 2]
+                fvgTop := low[i + 2]
+                fvgBot := high[i]
+    // Breaker: nearest opposing-close candle at/before the raid extreme
+    float brkTop = na
+    float brkBot = na
+    extremeOff = isBull ? lowOff : highOff
+    for i = extremeOff to extremeOff + 10
+        if na(brkTop)
+            if isBull ? close[i] < open[i] : close[i] > open[i]
+                brkTop := high[i]
+                brkBot := low[i]
+    // The unicorn is the intersection
+    float zTop = math.min(fvgTop, brkTop)
+    float zBot = math.max(fvgBot, brkBot)
+    if not na(zTop) and not na(zBot) and zTop > zBot
+        box.delete(uniZone)
+        uniZone   := box.new(bar_index, zTop, bar_index + 5, zBot, border_color = color.new(isBull ? colBull : colBear, 40), bgcolor = color.new(isBull ? colBull : colBear, 82))
+        entryDir  := isBull ? 1 : -1
+        zoneBirth := bar_index
+        stopLevel := isBull ? low[lowOff] : high[highOff]
+        label.new(bar_index, isBull ? zBot : zTop, "🦄 " + (isBull ? "▲" : "▼"), style = isBull ? label.style_label_up : label.style_label_down, color = color.new(isBull ? colBull : colBear, 70), textcolor = color.white, size = size.small)
+    setup := 0
+
+// ── Entry management ────────────────────────────────────────────────────────
+longEntry  = false
+shortEntry = false
+if entryDir != 0 and not na(uniZone)
+    box.set_right(uniZone, bar_index)
+    zTop = box.get_top(uniZone)
+    zBot = box.get_bottom(uniZone)
+    if entryDir == 1 and low <= zTop and bar_index > zoneBirth
+        longEntry := true
+        line.new(bar_index, stopLevel, bar_index + 15, stopLevel, color = color.new(colBear, 40), style = line.style_dotted)
+        entryDir := 0
+    else if entryDir == -1 and high >= zBot and bar_index > zoneBirth
+        shortEntry := true
+        line.new(bar_index, stopLevel, bar_index + 15, stopLevel, color = color.new(colBull, 40), style = line.style_dotted)
+        entryDir := 0
+    else if bar_index - zoneBirth > zoneTimeout or (entryDir == 1 and close < zBot) or (entryDir == -1 and close > zTop)
+        box.delete(uniZone)
+        entryDir := 0
+
+// ── Markers & alerts ────────────────────────────────────────────────────────
+plotshape(longEntry,  "Unicorn Long",  shape.triangleup,   location.belowbar, color.new(colBull, 0), size = size.small)
+plotshape(shortEntry, "Unicorn Short", shape.triangledown, location.abovebar, color.new(colBear, 0), size = size.small)
+
+alertcondition(bullMSS, "Bullish MSS (Unicorn hunt)", "Unicorn: sweep + bullish MSS on {{ticker}} ({{interval}}) — checking breaker/FVG overlap")
+alertcondition(bearMSS, "Bearish MSS (Unicorn hunt)", "Unicorn: sweep + bearish MSS on {{ticker}} ({{interval}}) — checking breaker/FVG overlap")
+alertcondition(longEntry,  "Unicorn Long Entry",  "Unicorn: price returned to the breaker+FVG overlap — LONG on {{ticker}} ({{interval}})")
+alertcondition(shortEntry, "Unicorn Short Entry", "Unicorn: price returned to the breaker+FVG overlap — SHORT on {{ticker}} ({{interval}})")
