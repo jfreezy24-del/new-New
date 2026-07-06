@@ -1,0 +1,194 @@
+//@version=6
+// Machine Learning: Lorentzian Classification (Recreation)
+// Educational recreation of the concept behind jdehorty's famous script — one
+// of the most-boosted indicators in TradingView history (original is CC BY-NC-SA,
+// credit to @jdehorty).
+//
+// How it works: a k-Nearest-Neighbors classifier predicts whether price will be
+// higher or lower ~4 bars from now. Each historical bar is a point in a
+// 5-dimensional feature space (RSI, WaveTrend, CCI, ADX, fast RSI). Similarity
+// is measured with LORENTZIAN distance — log(1 + |Δfeature|) — instead of
+// Euclidean, which compresses the outsized feature jumps around news/volatility
+// events and empirically finds better neighbors than a straight-line metric.
+// The k nearest neighbors vote (+1 up / -1 down); the vote sum is the
+// prediction, gated by volatility/regime/ADX filters and a kernel trend filter.
+indicator("Machine Learning: Lorentzian Classification (Recreation)", shorttitle = "ML-LC", overlay = true, max_labels_count = 500)
+
+// ── Inputs ──────────────────────────────────────────────────────────────────
+neighborsCount = input.int(8,    "Neighbors Count",  minval = 1, maxval = 100, group = "General")
+maxBarsBack    = input.int(2000, "Max Bars Back",    minval = 50, maxval = 5000, group = "General", tooltip = "Training window size. Larger = slower")
+
+useVolFilter    = input.bool(true,  "Volatility Filter", group = "Filters")
+useRegimeFilter = input.bool(true,  "Regime Filter",     group = "Filters")
+regimeThresh    = input.float(-0.1, "Regime Threshold", minval = -10, maxval = 10, step = 0.1, group = "Filters")
+useAdxFilter    = input.bool(false, "ADX Filter",        group = "Filters")
+adxThresh       = input.int(20, "ADX Threshold", minval = 0, maxval = 100, group = "Filters")
+
+useEmaFilter = input.bool(false, "EMA Trend Filter", group = "Filters")
+emaPeriod    = input.int(200, "EMA Period", minval = 1, group = "Filters")
+
+useKernelFilter = input.bool(true, "Kernel Trend Filter", group = "Kernel")
+showKernel      = input.bool(true, "Show Kernel Estimate", group = "Kernel")
+kernelH         = input.int(8,  "Kernel Lookback Window", minval = 3, group = "Kernel")
+kernelR         = input.float(8.0, "Kernel Relative Weighting", minval = 0.25, step = 0.25, group = "Kernel")
+kernelX0        = input.int(25, "Kernel Regression Start Bar", minval = 2, group = "Kernel")
+
+showBarColors = input.bool(true, "Color Bars by Prediction Strength", group = "Display")
+
+// ── Feature engineering (each normalized to a comparable 0..1-ish range) ────
+// Rolling min/max normalizer (tracks all-time range like the original)
+normalizeWT(float src) =>
+    var float hMin = na
+    var float hMax = na
+    hMin := na(hMin) ? src : math.min(hMin, nz(src, hMin))
+    hMax := na(hMax) ? src : math.max(hMax, nz(src, hMax))
+    hMax - hMin != 0 ? (src - hMin) / (hMax - hMin) : 0.5
+
+normalizeCCI(float src) =>
+    var float hMin = na
+    var float hMax = na
+    hMin := na(hMin) ? src : math.min(hMin, nz(src, hMin))
+    hMax := na(hMax) ? src : math.max(hMax, nz(src, hMax))
+    hMax - hMin != 0 ? (src - hMin) / (hMax - hMin) : 0.5
+
+n_rsi(int n1, int n2) =>
+    ta.ema(ta.rsi(close, n1), n2) / 100
+
+n_wt(int n1, int n2) =>
+    ema1 = ta.ema(hlc3, n1)
+    ema2 = ta.ema(math.abs(hlc3 - ema1), n1)
+    ci  = (hlc3 - ema1) / (0.015 * ema2)
+    wt1 = ta.ema(ci, n2)
+    wt2 = ta.sma(wt1, 4)
+    normalizeWT(wt1 - wt2)
+
+n_cci(int n1, int n2) =>
+    normalizeCCI(ta.ema(ta.cci(close, n1), n2))
+
+[diPlus, diMinus, adxValue] = ta.dmi(14, 14)
+
+f1 = n_rsi(14, 1)      // Feature 1: RSI(14)
+f2 = n_wt(10, 11)      // Feature 2: WaveTrend(10, 11)
+f3 = n_cci(20, 1)      // Feature 3: CCI(20)
+f4 = adxValue / 100    // Feature 4: ADX(14)
+f5 = n_rsi(9, 1)       // Feature 5: RSI(9)
+
+// ── Training data: label each bar with the direction price moved over the
+//    following 4 bars (stored with the original's 4-bar offset quirk) ────────
+var array<float> f1Arr   = array.new<float>()
+var array<float> f2Arr   = array.new<float>()
+var array<float> f3Arr   = array.new<float>()
+var array<float> f4Arr   = array.new<float>()
+var array<float> f5Arr   = array.new<float>()
+var array<int>   yTrain  = array.new<int>()
+
+array.push(f1Arr, f1)
+array.push(f2Arr, f2)
+array.push(f3Arr, f3)
+array.push(f4Arr, f4)
+array.push(f5Arr, f5)
+array.push(yTrain, close[4] < close ? 1 : close[4] > close ? -1 : 0)
+
+// ── Lorentzian distance between the current bar and training bar i ──────────
+lorentzianDistance(int i) =>
+    math.log(1 + math.abs(f1 - array.get(f1Arr, i))) +
+     math.log(1 + math.abs(f2 - array.get(f2Arr, i))) +
+     math.log(1 + math.abs(f3 - array.get(f3Arr, i))) +
+     math.log(1 + math.abs(f4 - array.get(f4Arr, i))) +
+     math.log(1 + math.abs(f5 - array.get(f5Arr, i)))
+
+// ── Approximate Nearest Neighbors search ────────────────────────────────────
+// Walks the training window in chronological order, sampling every 4th bar.
+// A neighbor is admitted when its distance exceeds the running threshold
+// (keeps neighbors spread across time instead of clustered); when the set
+// overflows k, the oldest is evicted and the threshold resets to the 75th
+// percentile of kept distances — the original's characteristic trick.
+var array<float> distances   = array.new<float>()
+var array<int>   predictions = array.new<int>()
+var float prediction = 0.0
+var int   signal     = 0
+
+lastDistance = -1.0
+sizeLoop = math.min(maxBarsBack - 1, array.size(yTrain) - 1)
+maxBarsBackIndex = last_bar_index >= maxBarsBack ? last_bar_index - maxBarsBack : 0
+
+if bar_index >= maxBarsBackIndex
+    for i = 0 to sizeLoop
+        d = lorentzianDistance(i)
+        if d >= lastDistance and i % 4 != 0
+            lastDistance := d
+            array.push(distances, d)
+            array.push(predictions, array.get(yTrain, i))
+            if array.size(predictions) > neighborsCount
+                lastDistance := array.get(distances, math.round(neighborsCount * 3 / 4))
+                array.shift(distances)
+                array.shift(predictions)
+    prediction := array.sum(predictions)
+
+// ── Filters ─────────────────────────────────────────────────────────────────
+// Volatility: recent ATR must exceed longer-term ATR
+// (ta.* calls hoisted so v6's short-circuiting and/or can't starve their history)
+atrRecent   = ta.atr(1)
+atrBaseline = ta.atr(10)
+volFilterOk = not useVolFilter or atrRecent > atrBaseline
+
+// Regime: slope of a Kalman-like adaptive filter (KLMF) must not be declining
+// faster than the threshold — screens out dead, trendless tape
+regimeFilterOk() =>
+    src = ohlc4
+    var float value1 = 0.0
+    var float value2 = 0.0
+    var float klmf   = 0.0
+    value1 := 0.2 * (src - src[1]) + 0.8 * value1
+    value2 := 0.1 * (high - low) + 0.8 * value2
+    omega = math.abs(value1 / value2)
+    alpha = (-math.pow(omega, 2) + math.sqrt(math.pow(omega, 4) + 16 * math.pow(omega, 2))) / 8
+    klmf := alpha * src + (1 - alpha) * klmf
+    absSlope = math.abs(klmf - klmf[1])
+    emaSlope = ta.ema(absSlope, 200)
+    normalizedDecline = (absSlope - emaSlope) / emaSlope
+    not useRegimeFilter or normalizedDecline >= regimeThresh
+
+adxFilterOk = not useAdxFilter or adxValue > adxThresh
+emaValue    = ta.ema(close, emaPeriod)
+regimeOk    = regimeFilterOk()
+
+filterAll = volFilterOk and regimeOk and adxFilterOk
+
+// ── Signal state machine ────────────────────────────────────────────────────
+signal := prediction > 0 and filterAll ? 1 : prediction < 0 and filterAll ? -1 : signal
+
+// ── Rational Quadratic kernel regression (trend confirmation) ───────────────
+rationalQuadratic(float src, int lookbackK, float relativeWeight, int startAtBar) =>
+    currentWeight = 0.0
+    cumulativeWeight = 0.0
+    for i = 0 to startAtBar + 1
+        w = math.pow(1 + math.pow(i, 2) / (math.pow(lookbackK, 2) * 2 * relativeWeight), -relativeWeight)
+        currentWeight += src[i] * w
+        cumulativeWeight += w
+    currentWeight / cumulativeWeight
+
+yhat = rationalQuadratic(close, kernelH, kernelR, kernelX0)
+isBullishKernel = yhat > yhat[1]
+isBearishKernel = yhat < yhat[1]
+
+// ── Entries ─────────────────────────────────────────────────────────────────
+isNewSignal = ta.change(signal) != 0
+emaUpOk   = not useEmaFilter or close > emaValue
+emaDownOk = not useEmaFilter or close < emaValue
+
+buySignal  = signal ==  1 and isNewSignal and (not useKernelFilter or isBullishKernel) and emaUpOk
+sellSignal = signal == -1 and isNewSignal and (not useKernelFilter or isBearishKernel) and emaDownOk
+
+// ── Plots ───────────────────────────────────────────────────────────────────
+plot(showKernel ? yhat : na, "Kernel Estimate", color = isBullishKernel ? color.new(color.teal, 20) : color.new(color.orange, 20), linewidth = 2)
+plot(useEmaFilter ? emaValue : na, "Filter EMA", color = color.new(color.gray, 50))
+
+plotshape(buySignal,  "Buy",  shape.labelup,   location.belowbar, color.new(color.teal, 0),   text = "▲", textcolor = color.white, size = size.small)
+plotshape(sellSignal, "Sell", shape.labeldown, location.abovebar, color.new(color.orange, 0), text = "▼", textcolor = color.white, size = size.small)
+
+barcolor(showBarColors ? color.from_gradient(prediction, -neighborsCount, neighborsCount, color.new(color.orange, 20), color.new(color.teal, 20)) : na)
+
+// ── Alerts ──────────────────────────────────────────────────────────────────
+alertcondition(buySignal,  "ML-LC Buy",  "ML Lorentzian: BUY signal on {{ticker}} ({{interval}})")
+alertcondition(sellSignal, "ML-LC Sell", "ML Lorentzian: SELL signal on {{ticker}} ({{interval}})")

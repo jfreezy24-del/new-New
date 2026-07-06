@@ -23,6 +23,8 @@ traders most often build with Claude. This folder recreates the most popular one
 | `squeeze_momentum.pine` | **Squeeze Momentum** | A recreation of LazyBear's take on the TTM Squeeze — one of the most-copied indicators ever. Flags volatility compression (Bollinger Bands inside Keltner Channels) with a momentum histogram showing likely breakout direction. |
 | `ut_bot_atr_trailing_stop.pine` | **UT Bot — ATR Trailing Stop** | The famous "UT Bot Alerts" concept: an ATR trailing stop that flips long/short on cross, with optional Heikin Ashi smoothing and a 200 EMA trend filter. A staple of alert-driven and automated setups. |
 | `volume_profile.pine` | **Rolling Volume Profile** | Bins the last N bars' volume into price rows and draws the histogram with Point of Control and 70% Value Area lines — the classic "recreate a Premium feature" request. |
+| `ml_lorentzian_classification.pine` | **Machine Learning: Lorentzian Classification** | Recreation of the concept behind jdehorty's k-NN classifier — one of the most-boosted scripts in TradingView history. Five normalized features (RSI, WaveTrend, CCI, ADX, fast RSI), Lorentzian-distance nearest-neighbor voting, volatility/regime/ADX filters, and a rational-quadratic kernel trend filter. |
+| `nadaraya_watson_envelope.pine` | **Nadaraya-Watson Envelope** | Recreation of the concept behind LuxAlgo's Gaussian kernel regression envelope. Non-repainting endpoint mode for signals/alerts plus an optional repainting mode that draws the classic smooth two-sided fit with polylines. |
 
 ## How to use
 

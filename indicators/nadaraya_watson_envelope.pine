@@ -1,0 +1,106 @@
+//@version=6
+// Nadaraya-Watson Envelope (Recreation)
+// Educational recreation of the concept behind LuxAlgo's hugely popular script
+// (original is CC BY-NC-SA, credit to @LuxAlgo).
+//
+// Nadaraya-Watson is kernel regression: each point of the fit is a weighted
+// average of prices in a window, with weights from a Gaussian kernel — a very
+// smooth, lag-resistant curve. Bands are the fit ± a multiple of the mean
+// absolute error, and touches of the bands flag mean-reversion extremes.
+//
+// Two modes:
+//  - Endpoint (non-repainting): only past bars weigh into each value, so
+//    printed values never change. Use this for signals/alerts.
+//  - Repainting: the classic smooth historical envelope, recomputed over the
+//    whole window every bar. Prettier, but history redraws — analysis only.
+indicator("Nadaraya-Watson Envelope (Recreation)", shorttitle = "NW Envelope", overlay = true, max_bars_back = 500, max_labels_count = 500)
+
+// ── Inputs ──────────────────────────────────────────────────────────────────
+h    = input.float(8.0, "Bandwidth", minval = 1, step = 0.5, tooltip = "Gaussian kernel bandwidth — higher = smoother")
+mult = input.float(3.0, "Band Multiplier", minval = 0.1, step = 0.1)
+src  = input.source(close, "Source")
+repaintMode = input.bool(false, "Repainting Mode (smooth historical fit)", tooltip = "Draws the full smoothed envelope but recalculates history on every bar. Keep OFF for signals and alerts")
+
+winSize = 499 // window of bars used by the regression (fixed, like the original)
+
+colUp = color.teal
+colDn = color.orange
+
+// ── Gaussian kernel ─────────────────────────────────────────────────────────
+gauss(float x, float bandwidth) =>
+    math.exp(-(x * x) / (bandwidth * bandwidth * 2))
+
+// ── Endpoint method (non-repainting): causal weighted mean of past bars ─────
+var array<float> coefs = array.new<float>()
+var float den = 0.0
+if barstate.isfirst
+    for i = 0 to winSize
+        array.push(coefs, gauss(i, h))
+    den := array.sum(coefs)
+
+out = 0.0
+for i = 0 to winSize
+    out += nz(src[i], src) * array.get(coefs, i)
+out /= den
+
+mae   = ta.sma(math.abs(src - out), winSize + 1) * mult
+upper = out + mae
+lower = out - mae
+
+plot(repaintMode ? na : out,   "NW Estimate (endpoint)", color = color.new(color.gray, 0), linewidth = 2)
+plot(repaintMode ? na : upper, "Upper Band (endpoint)",  color = color.new(colDn, 30))
+plot(repaintMode ? na : lower, "Lower Band (endpoint)",  color = color.new(colUp, 30))
+
+// ── Mean-reversion signals (always from the non-repainting endpoint calc) ───
+bullSignal = ta.crossunder(src, lower) // price stretched below the envelope
+bearSignal = ta.crossover(src, upper)  // price stretched above the envelope
+
+plotshape(bullSignal, "Bullish Extreme", shape.triangleup,   location.belowbar, color.new(colUp, 0), size = size.tiny)
+plotshape(bearSignal, "Bearish Extreme", shape.triangledown, location.abovebar, color.new(colDn, 0), size = size.tiny)
+
+alertcondition(bullSignal, "NW Bullish Extreme", "NW Envelope: {{ticker}} ({{interval}}) stretched below the lower band")
+alertcondition(bearSignal, "NW Bearish Extreme", "NW Envelope: {{ticker}} ({{interval}}) stretched above the upper band")
+
+// ── Repainting mode: full two-sided kernel fit drawn over the window ────────
+var polyline plMid = na
+var polyline plUp  = na
+var polyline plDn  = na
+
+if repaintMode and barstate.islast
+    polyline.delete(plMid)
+    polyline.delete(plUp)
+    polyline.delete(plDn)
+
+    n = math.min(winSize, bar_index)
+
+    // Pass 1: kernel estimate at every offset in the window (two-sided)
+    est = array.new<float>(n + 1, 0.0)
+    for k = 0 to n
+        sumW  = 0.0
+        sumWY = 0.0
+        for i = 0 to n
+            w = gauss(i - k, h)
+            sumW  += w
+            sumWY += w * src[i]
+        array.set(est, k, sumWY / sumW)
+
+    // Pass 2: mean absolute error over the window sets the band width
+    sae = 0.0
+    for k = 0 to n
+        sae += math.abs(src[k] - array.get(est, k))
+    bandWidth = sae / (n + 1) * mult
+
+    // Pass 3: build the three curves (oldest → newest)
+    ptsMid = array.new<chart.point>()
+    ptsUp  = array.new<chart.point>()
+    ptsDn  = array.new<chart.point>()
+    for k = n to 0
+        y = array.get(est, k)
+        x = bar_index - k
+        array.push(ptsMid, chart.point.from_index(x, y))
+        array.push(ptsUp,  chart.point.from_index(x, y + bandWidth))
+        array.push(ptsDn,  chart.point.from_index(x, y - bandWidth))
+
+    plMid := polyline.new(ptsMid, curved = false, line_color = color.new(color.gray, 0),  line_width = 2)
+    plUp  := polyline.new(ptsUp,  curved = false, line_color = color.new(colDn, 30))
+    plDn  := polyline.new(ptsDn,  curved = false, line_color = color.new(colUp, 30))
