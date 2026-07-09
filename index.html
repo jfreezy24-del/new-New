@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>APEX TERMINAL</title>
+<link rel="stylesheet" href="css/terminal.css">
+</head>
+<body>
+<div id="app">
+
+  <header id="topbar">
+    <div class="brand">APEX<span>TERMINAL</span></div>
+    <div class="cmdwrap">
+      <span class="prompt">&gt;</span>
+      <input id="cmd" spellcheck="false" autocomplete="off"
+             placeholder="Enter command — e.g.  AAPL <GO>   ·   GP   ·   DES   ·   HELP">
+      <button id="go-btn" title="Execute (Enter)">GO</button>
+    </div>
+    <div class="statusarea">
+      <span class="live-dot">●</span><span class="live-label">LIVE</span>
+      <span class="feed-label">SIMULATED FEED</span>
+      <span id="clock">--:--:--</span>
+    </div>
+  </header>
+
+  <div id="msgline">READY — TYPE A TICKER AND PRESS ENTER, OR F1 FOR HELP</div>
+
+  <nav id="fkeys">
+    <button data-fn="HELP"><b>F1</b> HELP</button>
+    <button data-fn="DES"><b>F2</b> DES · DESCRIPTION</button>
+    <button data-fn="GP"><b>F3</b> GP · PRICE GRAPH</button>
+    <button data-fn="N"><b>F4</b> N · NEWS</button>
+    <button data-fn="MOST"><b>F5</b> MOST · MOVERS</button>
+    <button data-fn="WEI"><b>F6</b> WEI · WORLD</button>
+  </nav>
+
+  <main id="grid">
+
+    <section class="panel" id="watch-panel">
+      <div class="panel-head"><span class="ph-code">W</span><span>WATCHLIST</span></div>
+      <div class="wl-cols"><span>SECURITY</span><span>LAST</span><span>CHG%</span><span>30D</span></div>
+      <div id="watch-body"></div>
+    </section>
+
+    <section class="panel" id="center-panel">
+      <div class="panel-head">
+        <span class="ph-code" id="view-code">GP</span>
+        <span id="view-title">PRICE GRAPH</span>
+        <div id="chart-controls">
+          <div class="btn-group" id="range-group">
+            <button data-range="1D">1D</button>
+            <button data-range="1M">1M</button>
+            <button data-range="6M">6M</button>
+            <button data-range="1Y" class="active">1Y</button>
+            <button data-range="5Y">5Y</button>
+          </div>
+          <div class="btn-group" id="type-group">
+            <button data-type="line" class="active">LINE</button>
+            <button data-type="candle">CNDL</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="view active" id="view-gp">
+        <div id="compare-legend"></div>
+        <div id="chart-wrap">
+          <canvas id="chart"></canvas>
+          <div id="tooltip"></div>
+        </div>
+      </div>
+
+      <div class="view" id="view-des"></div>
+      <div class="view" id="view-news"></div>
+      <div class="view" id="view-most"></div>
+      <div class="view" id="view-wei"></div>
+
+      <div class="view" id="view-help">
+        <div class="help-inner">
+          <h2>APEX TERMINAL — COMMAND REFERENCE</h2>
+          <p class="help-sub">Type a command in the amber bar and press <b>ENTER</b> (&lt;GO&gt;). Commands are not case-sensitive.</p>
+          <table class="help-table">
+            <tr><td>TICKER &lt;GO&gt;</td><td>Load a security — e.g. <b>AAPL</b>, <b>NVDA</b>, <b>SPX</b>, <b>EURUSD</b>, <b>BTC</b>, <b>CL1</b></td></tr>
+            <tr><td>DES</td><td>Security description &amp; key statistics <span class="kbd">F2</span></td></tr>
+            <tr><td>GP</td><td>Price graph — line or candles, 1D→5Y <span class="kbd">F3</span></td></tr>
+            <tr><td>N</td><td>News wire for the loaded security <span class="kbd">F4</span></td></tr>
+            <tr><td>MOST</td><td>Most-active movers, ranked by day change <span class="kbd">F5</span></td></tr>
+            <tr><td>WEI</td><td>World equity indices, FX, commodities, crypto <span class="kbd">F6</span></td></tr>
+            <tr><td>COMP TICKER</td><td>Overlay a comparison on the graph (indexed % return) — e.g. <b>COMP MSFT</b>. Up to 3.</td></tr>
+            <tr><td>CLR</td><td>Clear all comparison overlays</td></tr>
+            <tr><td>W ADD TICKER</td><td>Add a security to the watchlist · <b>W DEL TICKER</b> removes it</td></tr>
+            <tr><td>HELP</td><td>This screen <span class="kbd">F1</span></td></tr>
+          </table>
+          <p class="help-note">All market data on this terminal is simulated in the browser — a deterministic random-walk engine with live ticks. No external feed, no network calls.</p>
+        </div>
+      </div>
+    </section>
+
+    <aside id="right-col">
+      <section class="panel" id="quote-panel">
+        <div class="panel-head"><span class="ph-code">Q</span><span>QUOTE</span></div>
+        <div id="quote-body"></div>
+      </section>
+      <section class="panel" id="headline-panel">
+        <div class="panel-head"><span class="ph-code">TOP</span><span>TOP NEWS</span></div>
+        <div id="headline-body"></div>
+      </section>
+    </aside>
+
+  </main>
+
+  <footer id="tape"><div id="tape-track"></div></footer>
+
+</div>
+
+<script src="js/data.js"></script>
+<script src="js/chart.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
